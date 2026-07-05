@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../lib/api";
 import { useSession } from "../context/SessionContext";
 
@@ -34,28 +34,38 @@ export default function StaffLogin() {
   }
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" style={{ maxWidth: 400, paddingTop: 64 }}>
+      <div className="stack" style={{ alignItems: "center", marginBottom: 20 }}>
+        <span className="brand__mark" aria-hidden="true">
+          +
+        </span>
+        <strong>HEDIS Care Gap</strong>
+      </div>
       <h2>Staff sign in</h2>
       <form className="card" onSubmit={onSubmit}>
         {error && <p className="error-text">{error}</p>}
         <label htmlFor="email">Email</label>
-        <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        <input id="email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required />
         <label htmlFor="password">Password</label>
         <input
           id="password"
           type="password"
+          autoComplete="current-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           required
         />
-        <button className="btn" type="submit" disabled={loading}>
-          {loading ? "Signing in..." : "Sign in"}
+        <button className="btn" type="submit" disabled={loading} style={{ width: "100%" }}>
+          {loading ? "Signing in…" : "Sign in"}
         </button>
       </form>
-      <p style={{ color: "var(--muted)", fontSize: 13 }}>
+      <p className="muted" style={{ fontSize: 13 }}>
         Demo accounts (dev seed): care-manager@demo-plan.example.com / admin@demo-plan.example.com /
         superadmin@example.com — password changeme123
       </p>
+      <Link to="/" className="muted" style={{ fontSize: 13, textDecoration: "none" }}>
+        ← Back home
+      </Link>
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useSession } from "../../context/SessionContext";
 import { api } from "../../lib/api";
 
@@ -39,10 +39,29 @@ interface CaseDetailResponse {
   notes: Note[];
 }
 
+const MEASURE_LABELS: Record<string, string> = {
+  mental_health: "Depression Screening & Follow-Up",
+  breast_cancer: "Breast Cancer Screening",
+};
+
+const SEVERITY_BADGE: Record<string, string> = {
+  minimal: "done",
+  mild: "open",
+  moderate: "follow-up",
+  moderately_severe: "follow-up",
+  severe: "safety",
+};
+
+function statusBadge(status: string) {
+  if (status === "needs_follow_up") return <span className="badge follow-up">Follow-up due</span>;
+  if (status === "completed" || status === "closed") return <span className="badge done">Closed</span>;
+  if (status === "excluded") return <span className="badge excluded">Excluded</span>;
+  return <span className="badge open">{status.replace(/_/g, " ")}</span>;
+}
+
 export default function CaseDetail() {
   const { gapId } = useParams();
   const { staff } = useSession();
-  const navigate = useNavigate();
   const [data, setData] = useState<CaseDetailResponse | null>(null);
   const [note, setNote] = useState("");
   const [sendingOutreach, setSendingOutreach] = useState(false);
@@ -85,77 +104,94 @@ export default function CaseDetail() {
     }
   }
 
-  if (!data) return <div className="app-shell">Loading…</div>;
+  if (!data) {
+    return (
+      <div className="empty-state">
+        <span className="spinner" />
+      </div>
+    );
+  }
+
+  const isClosed = data.status === "closed" || data.status === "excluded";
 
   return (
-    <div className="app-shell">
-      <Link to="/queue">← Back to queue</Link>
-      <h2>{data.member_alias}</h2>
+    <>
+      <Link to="/queue" className="muted" style={{ fontSize: 14, textDecoration: "none" }}>
+        ← Back to queue
+      </Link>
+
+      <div className="page-header" style={{ marginTop: 8 }}>
+        <h1>{data.member_alias}</h1>
+        <div className="stack" style={{ alignItems: "center" }}>
+          <span className="muted">{MEASURE_LABELS[data.measure_code] ?? data.measure_code}</span>
+          {statusBadge(data.status)}
+        </div>
+      </div>
+
       {data.safety_flag && (
         <div className="safety-card">
           <strong>Safety flag active</strong> — this member indicated thoughts of self-harm. Follow the crisis
           escalation protocol.
         </div>
       )}
+
       <div className="card">
-        <p>
-          <strong>Measure:</strong> {data.measure_code} &nbsp;|&nbsp; <strong>Status:</strong> {data.status}
-        </p>
         {data.follow_up_due_at && (
           <p>
             <strong>Follow-up due:</strong> {new Date(data.follow_up_due_at).toLocaleString()}
           </p>
         )}
-        {data.status === "excluded" && (
-          <p style={{ color: "var(--muted)" }}>
-            <strong>Excluded from denominator.</strong>
-          </p>
+        {!isClosed && (
+          <div className="stack">
+            <button className="btn secondary" onClick={sendOutreach} disabled={sendingOutreach}>
+              {sendingOutreach ? "Sending…" : "Send outreach"}
+            </button>
+            <button className="btn" onClick={() => updateStatus("closed")}>
+              Mark closed
+            </button>
+            <button className="btn danger" onClick={excludeGap}>
+              Exclude
+            </button>
+          </div>
         )}
-        <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn secondary" onClick={sendOutreach} disabled={sendingOutreach}>
-            {sendingOutreach ? "Sending…" : "Send outreach"}
-          </button>
-          <button className="btn" onClick={() => updateStatus("closed")}>
-            Mark closed
-          </button>
-          <button className="btn danger" onClick={excludeGap}>
-            Exclude
-          </button>
-        </div>
       </div>
 
       <h3>Screening results</h3>
-      {data.submissions.length === 0 && <p>No submissions yet.</p>}
+      {data.submissions.length === 0 && <div className="card empty-state">No submissions yet.</div>}
       {data.submissions.map((s, i) => (
         <div className="card" key={i}>
-          <p>{new Date(s.submitted_at).toLocaleString()}</p>
-          {s.instrument_scores.phq9 && (
-            <p>
-              PHQ-9: {s.instrument_scores.phq9.total} ({s.instrument_scores.phq9.severity})
-            </p>
-          )}
-          {s.instrument_scores.gad7 && (
-            <p>
-              GAD-7: {s.instrument_scores.gad7.total} ({s.instrument_scores.gad7.severity})
-            </p>
-          )}
-          {s.instrument_scores.bcs && (
-            <p>
-              Mammogram: {s.instrument_scores.bcs.has_completed ? "completed" : "not completed"}
-              {!s.instrument_scores.bcs.has_completed &&
-                (s.instrument_scores.bcs.wants_scheduling_help
-                  ? " — wants scheduling help"
-                  : " — declined scheduling help for now")}
-            </p>
-          )}
+          <p className="muted" style={{ fontSize: 13, marginBottom: 8 }}>
+            {new Date(s.submitted_at).toLocaleString()}
+          </p>
+          <div className="stack">
+            {s.instrument_scores.phq9 && (
+              <span className={`badge ${SEVERITY_BADGE[s.instrument_scores.phq9.severity] ?? "open"}`}>
+                PHQ-9: {s.instrument_scores.phq9.total} ({s.instrument_scores.phq9.severity.replace(/_/g, " ")})
+              </span>
+            )}
+            {s.instrument_scores.gad7 && (
+              <span className={`badge ${SEVERITY_BADGE[s.instrument_scores.gad7.severity] ?? "open"}`}>
+                GAD-7: {s.instrument_scores.gad7.total} ({s.instrument_scores.gad7.severity})
+              </span>
+            )}
+            {s.instrument_scores.bcs && (
+              <span className={`badge ${s.instrument_scores.bcs.has_completed ? "done" : "follow-up"}`}>
+                Mammogram: {s.instrument_scores.bcs.has_completed ? "completed" : "not completed"}
+                {!s.instrument_scores.bcs.has_completed &&
+                  (s.instrument_scores.bcs.wants_scheduling_help ? " — wants help" : " — declined help")}
+              </span>
+            )}
+          </div>
         </div>
       ))}
 
       <h3>Case notes</h3>
       {data.notes.map((n) => (
-        <div className="card" key={n.id}>
-          <p>{n.note}</p>
-          <p style={{ color: "var(--muted)", fontSize: 12 }}>{new Date(n.created_at).toLocaleString()}</p>
+        <div className="card card--tight" key={n.id}>
+          <p style={{ marginBottom: 4 }}>{n.note}</p>
+          <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
+            {new Date(n.created_at).toLocaleString()}
+          </p>
         </div>
       ))}
       <div className="card">
@@ -164,6 +200,6 @@ export default function CaseDetail() {
           Add note
         </button>
       </div>
-    </div>
+    </>
   );
 }

@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useSession } from "./context/SessionContext";
+import AppNav from "./components/AppNav";
 import Landing from "./pages/Landing";
 import StaffLogin from "./pages/StaffLogin";
 import MemberEntry from "./pages/member/MemberEntry";
@@ -20,6 +21,17 @@ function RequireMember({ children }: { children: JSX.Element }) {
   return member ? children : <Navigate to="/start" replace />;
 }
 
+function StaffPage({ children, wide = false }: { children: JSX.Element; wide?: boolean }) {
+  return (
+    <RequireStaff>
+      <>
+        <AppNav />
+        <div className={wide ? "app-shell app-shell--wide" : "app-shell"}>{children}</div>
+      </>
+    </RequireStaff>
+  );
+}
+
 export default function App() {
   return (
     <Routes>
@@ -38,33 +50,33 @@ export default function App() {
       <Route
         path="/queue"
         element={
-          <RequireStaff>
+          <StaffPage wide>
             <Queue />
-          </RequireStaff>
+          </StaffPage>
         }
       />
       <Route
         path="/queue/:gapId"
         element={
-          <RequireStaff>
+          <StaffPage>
             <CaseDetail />
-          </RequireStaff>
+          </StaffPage>
         }
       />
       <Route
         path="/admin/measures"
         element={
-          <RequireStaff>
+          <StaffPage>
             <TenantConfig />
-          </RequireStaff>
+          </StaffPage>
         }
       />
       <Route
         path="/superadmin"
         element={
-          <RequireStaff>
+          <StaffPage wide>
             <SuperAdmin />
-          </RequireStaff>
+          </StaffPage>
         }
       />
     </Routes>

@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { useSession } from "../../context/SessionContext";
 import { api } from "../../lib/api";
 
@@ -12,7 +11,7 @@ interface MeasureCatalogEntry {
 
 export default function TenantConfig() {
   const { staff } = useSession();
-  const [measures, setMeasures] = useState<MeasureCatalogEntry[]>([]);
+  const [measures, setMeasures] = useState<MeasureCatalogEntry[] | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
 
   function load() {
@@ -33,18 +32,35 @@ export default function TenantConfig() {
   }
 
   return (
-    <div className="app-shell">
-      <Link to="/queue">← Back to queue</Link>
-      <h2>Measure modules</h2>
-      <p style={{ color: "var(--muted)" }}>
-        Elect which HEDIS measure modules are active for your plan. Each module runs its own eligibility rules,
-        outreach templates, and gap tracking independently.
-      </p>
-      {measures.map((m) => (
-        <div className="card" key={m.code} style={{ display: "flex", justifyContent: "space-between", gap: 16 }}>
+    <>
+      <div className="page-header">
+        <h1>Measure modules</h1>
+        <p>
+          Elect which HEDIS measure modules are active for your plan. Each module runs its own eligibility rules,
+          outreach templates, and gap tracking independently — enabling or disabling one never touches the others.
+        </p>
+      </div>
+
+      {measures === null && (
+        <div className="empty-state">
+          <span className="spinner" />
+        </div>
+      )}
+
+      {measures?.map((m) => (
+        <div className="card" key={m.code} style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "center" }}>
           <div>
-            <strong>{m.hedis_measure_name}</strong>
-            <p style={{ color: "var(--muted)", fontSize: 14 }}>{m.description}</p>
+            <div className="stack" style={{ alignItems: "center", marginBottom: 4 }}>
+              <strong>{m.hedis_measure_name}</strong>
+              {m.enabled ? (
+                <span className="badge done">Enabled</span>
+              ) : (
+                <span className="badge open">Disabled</span>
+              )}
+            </div>
+            <p className="muted" style={{ fontSize: 14, marginBottom: 0 }}>
+              {m.description}
+            </p>
           </div>
           <div>
             <button
@@ -52,11 +68,11 @@ export default function TenantConfig() {
               disabled={saving === m.code}
               onClick={() => toggle(m.code, !m.enabled)}
             >
-              {m.enabled ? "Disable" : "Enable"}
+              {saving === m.code ? "Saving…" : m.enabled ? "Disable" : "Enable"}
             </button>
           </div>
         </div>
       ))}
-    </div>
+    </>
   );
 }

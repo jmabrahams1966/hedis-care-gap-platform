@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useSession } from "../../context/SessionContext";
 import { api, ApiError } from "../../lib/api";
 import { GAD7_ITEMS, PHQ9_ITEMS, RESPONSE_SCALE } from "../../data/instruments";
+import StepIndicator from "../../components/StepIndicator";
 
 interface PendingGap {
   care_gap_id: string;
@@ -46,7 +47,12 @@ export default function ScreeningFlow() {
     );
   }
 
-  if (loadState === "loading") return <Shell>Loading…</Shell>;
+  if (loadState === "loading")
+    return (
+      <Shell>
+        <span className="spinner" />
+      </Shell>
+    );
   if (loadState === "error")
     return <Shell>Something went wrong. Please refresh or use the link we sent again.</Shell>;
   if (loadState === "none_due")
@@ -66,19 +72,19 @@ export default function ScreeningFlow() {
             <br />
             <strong>Crisis Text Line</strong> — text HOME to 741741
           </p>
-          <p>A care manager from your health plan will also be reaching out to check in with you.</p>
+          <p style={{ marginBottom: 0 }}>A care manager from your health plan will also be reaching out to check in with you.</p>
         </div>
       </div>
     );
   }
 
   if (outcome === "help_scheduling") {
-    return <Shell>Thanks! A care manager from your health plan will reach out soon to help you schedule.</Shell>;
+    return <Shell success>Thanks! A care manager from your health plan will reach out soon to help you schedule.</Shell>;
   }
 
   if (outcome === "done") {
     return (
-      <Shell>
+      <Shell success>
         Thanks, {member?.firstName}! Your check-in is complete. A care team member may follow up if needed.
       </Shell>
     );
@@ -90,10 +96,13 @@ export default function ScreeningFlow() {
   return <MentalHealthFlow onSubmit={submit} onOutcome={setOutcome} />;
 }
 
-function Shell({ children }: { children: React.ReactNode }) {
+function Shell({ children, success = false }: { children: React.ReactNode; success?: boolean }) {
   return (
-    <div className="app-shell">
-      <div className="card">{children}</div>
+    <div className="app-shell" style={{ paddingTop: 64 }}>
+      <div className="card" style={{ textAlign: "center" }}>
+        {success && <div style={{ fontSize: 32, marginBottom: 8 }}>✓</div>}
+        {children}
+      </div>
     </div>
   );
 }
@@ -122,6 +131,8 @@ function MentalHealthFlow({
   if (step === "phq9") {
     return (
       <Questionnaire
+        stepIndex={0}
+        totalSteps={2}
         title="Over the last 2 weeks, how often have you been bothered by any of the following?"
         items={PHQ9_ITEMS}
         answers={phq9}
@@ -132,13 +143,15 @@ function MentalHealthFlow({
   }
 
   return (
-    <div>
+    <>
       {error && (
-        <div className="app-shell">
+        <div className="app-shell" style={{ paddingBottom: 0 }}>
           <p className="error-text">{error}</p>
         </div>
       )}
       <Questionnaire
+        stepIndex={1}
+        totalSteps={2}
         title="Over the last 2 weeks, how often have you been bothered by the following?"
         items={GAD7_ITEMS}
         answers={gad7}
@@ -146,7 +159,7 @@ function MentalHealthFlow({
         onNext={() => handleFinalSubmit(gad7)}
         submitLabel="Submit"
       />
-    </div>
+    </>
   );
 }
 
@@ -177,13 +190,13 @@ function BreastCancerFlow({
 
   return (
     <div className="app-shell">
+      <StepIndicator step={hasCompleted === false ? 1 : 0} total={hasCompleted === false ? 2 : 1} />
       {error && <p className="error-text">{error}</p>}
       <div className="card">
         <p>Have you had a mammogram (breast cancer screening) in the last 2 years?</p>
-        <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 400 }}>
+        <label className="choice">
           <input
             type="radio"
-            style={{ width: "auto" }}
             name="has_completed"
             checked={hasCompleted === true}
             onChange={() => {
@@ -193,10 +206,9 @@ function BreastCancerFlow({
           />
           Yes, I've had one
         </label>
-        <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 400 }}>
+        <label className="choice" style={{ marginBottom: 0 }}>
           <input
             type="radio"
-            style={{ width: "auto" }}
             name="has_completed"
             checked={hasCompleted === false}
             onChange={() => setHasCompleted(false)}
@@ -208,20 +220,18 @@ function BreastCancerFlow({
       {hasCompleted === false && (
         <div className="card">
           <p>Would you like help scheduling one?</p>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 400 }}>
+          <label className="choice">
             <input
               type="radio"
-              style={{ width: "auto" }}
               name="wants_help"
               checked={wantsHelp === true}
               onChange={() => setWantsHelp(true)}
             />
             Yes, please have someone reach out
           </label>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 400 }}>
+          <label className="choice" style={{ marginBottom: 0 }}>
             <input
               type="radio"
-              style={{ width: "auto" }}
               name="wants_help"
               checked={wantsHelp === false}
               onChange={() => setWantsHelp(false)}
@@ -235,6 +245,7 @@ function BreastCancerFlow({
         className="btn"
         disabled={submitting || hasCompleted === null || (hasCompleted === false && wantsHelp === null)}
         onClick={finish}
+        style={{ width: "100%" }}
       >
         {submitting ? "Submitting…" : "Submit"}
       </button>
@@ -243,6 +254,8 @@ function BreastCancerFlow({
 }
 
 function Questionnaire({
+  stepIndex,
+  totalSteps,
   title,
   items,
   answers,
@@ -250,6 +263,8 @@ function Questionnaire({
   onNext,
   submitLabel = "Continue",
 }: {
+  stepIndex: number;
+  totalSteps: number;
   title: string;
   items: string[];
   answers: number[];
@@ -258,6 +273,7 @@ function Questionnaire({
   submitLabel?: string;
 }) {
   const complete = answers.every((a) => a >= 0);
+  const answeredCount = answers.filter((a) => a >= 0).length;
 
   function setAnswer(i: number, value: number) {
     const next = [...answers];
@@ -267,15 +283,18 @@ function Questionnaire({
 
   return (
     <div className="app-shell">
-      <p style={{ color: "var(--muted)" }}>{title}</p>
+      <StepIndicator step={stepIndex} total={totalSteps} />
+      <p className="muted">{title}</p>
       {items.map((item, i) => (
         <div className="card" key={i}>
+          <p className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+            QUESTION {i + 1} OF {items.length}
+          </p>
           <p>{item}</p>
           {RESPONSE_SCALE.map((label, value) => (
-            <label key={value} style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 400 }}>
+            <label key={value} className="choice" style={value === RESPONSE_SCALE.length - 1 ? { marginBottom: 0 } : undefined}>
               <input
                 type="radio"
-                style={{ width: "auto" }}
                 name={`q-${i}`}
                 checked={answers[i] === value}
                 onChange={() => setAnswer(i, value)}
@@ -285,8 +304,8 @@ function Questionnaire({
           ))}
         </div>
       ))}
-      <button className="btn" disabled={!complete} onClick={onNext}>
-        {submitLabel}
+      <button className="btn" disabled={!complete} onClick={onNext} style={{ width: "100%" }}>
+        {submitLabel} {!complete && `(${answeredCount}/${items.length})`}
       </button>
     </div>
   );

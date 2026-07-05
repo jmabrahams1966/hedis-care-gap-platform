@@ -26,8 +26,21 @@ export default function Verify() {
   }, [params]);
 
   return (
-    <div className="app-shell">
-      <div className="card">{error ? <p className="error-text">{error}</p> : <p>Verifying your link…</p>}</div>
+    <div className="app-shell" style={{ paddingTop: 64 }}>
+      <div className="card" style={{ textAlign: "center" }}>
+        {error ? (
+          <p className="error-text" style={{ marginBottom: 0 }}>
+            {error}
+          </p>
+        ) : (
+          <>
+            <span className="spinner" style={{ marginBottom: 12 }} />
+            <p className="muted" style={{ marginBottom: 0 }}>
+              Verifying your link…
+            </p>
+          </>
+        )}
+      </div>
     </div>
   );
 }

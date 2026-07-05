@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useSession } from "../../context/SessionContext";
 import { api } from "../../lib/api";
@@ -14,17 +14,30 @@ interface GapRow {
   member_alias: string;
 }
 
+const MEASURE_LABELS: Record<string, string> = {
+  mental_health: "Depression Screening & Follow-Up",
+  breast_cancer: "Breast Cancer Screening",
+};
+
+const FILTERS = [
+  { key: "all", label: "All open" },
+  { key: "safety", label: "Safety flags" },
+  { key: "needs_follow_up", label: "Needs follow-up" },
+  { key: "open", label: "Not yet contacted" },
+] as const;
+
 function statusBadge(gap: GapRow) {
   if (gap.safety_flag) return <span className="badge safety">Safety flag</span>;
   if (gap.status === "needs_follow_up") return <span className="badge follow-up">Follow-up due</span>;
   if (gap.status === "completed" || gap.status === "closed") return <span className="badge done">Closed</span>;
-  return <span className="badge open">{gap.status.replace("_", " ")}</span>;
+  return <span className="badge open">{gap.status.replace(/_/g, " ")}</span>;
 }
 
 export default function Queue() {
   const { staff } = useSession();
   const [gaps, setGaps] = useState<GapRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<(typeof FILTERS)[number]["key"]>("all");
 
   useEffect(() => {
     api
@@ -33,43 +46,78 @@ export default function Queue() {
       .finally(() => setLoading(false));
   }, [staff]);
 
+  const filtered = useMemo(() => {
+    if (filter === "all") return gaps;
+    if (filter === "safety") return gaps.filter((g) => g.safety_flag);
+    return gaps.filter((g) => g.status === filter && !g.safety_flag);
+  }, [gaps, filter]);
+
+  const safetyCount = gaps.filter((g) => g.safety_flag).length;
+
   return (
-    <div className="app-shell">
-      <nav className="top" style={{ margin: "-24px -16px 24px" }}>
-        <strong>Care Gap Queue</strong>
-        <span style={{ display: "flex", gap: 12 }}>
-          {staff?.role === "super_admin" && <Link to="/superadmin">Tenants</Link>}
-          {(staff?.role === "payer_admin" || staff?.role === "super_admin") && (
-            <Link to="/admin/measures">Measures</Link>
-          )}
-        </span>
-      </nav>
-      {loading && <p>Loading…</p>}
-      {!loading && gaps.length === 0 && <p>No open care gaps. Nice work.</p>}
-      {!loading && gaps.length > 0 && (
-        <table className="card">
-          <thead>
-            <tr>
-              <th>Member</th>
-              <th>Measure</th>
-              <th>Status</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {gaps.map((g) => (
-              <tr key={g.id}>
-                <td>{g.member_alias}</td>
-                <td>{g.measure_code}</td>
-                <td>{statusBadge(g)}</td>
-                <td>
-                  <Link to={`/queue/${g.id}`}>View</Link>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+    <>
+      <div className="page-header">
+        <h1>Care Gap Queue</h1>
+        <p>De-identified triage queue, sorted safety-first.</p>
+      </div>
+
+      {safetyCount > 0 && (
+        <div className="safety-card">
+          <strong>
+            {safetyCount} member{safetyCount > 1 ? "s" : ""} flagged for safety
+          </strong>{" "}
+          — review immediately.
+        </div>
       )}
-    </div>
+
+      <div className="stack" style={{ marginBottom: 16 }}>
+        {FILTERS.map((f) => (
+          <button
+            key={f.key}
+            className={filter === f.key ? "btn sm" : "btn secondary sm"}
+            onClick={() => setFilter(f.key)}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+      {loading && (
+        <div className="empty-state">
+          <span className="spinner" />
+        </div>
+      )}
+      {!loading && filtered.length === 0 && (
+        <div className="card empty-state">Nothing here — nice work.</div>
+      )}
+      {!loading && filtered.length > 0 && (
+        <div className="card" style={{ padding: 0, overflowX: "auto" }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Member</th>
+                <th>Measure</th>
+                <th>Status</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((g) => (
+                <tr key={g.id}>
+                  <td>{g.member_alias}</td>
+                  <td>{MEASURE_LABELS[g.measure_code] ?? g.measure_code}</td>
+                  <td>{statusBadge(g)}</td>
+                  <td style={{ textAlign: "right" }}>
+                    <Link to={`/queue/${g.id}`} className="btn secondary sm">
+                      View
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
   );
 }
