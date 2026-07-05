@@ -1,0 +1,4 @@
+external_member_id,first_name,last_name,date_of_birth,sex,phone,email,preferred_channel,preferred_language,consent_sms,consent_email
+EXT-2001,Maria,Lopez,1968-08-22,F,+15550002001,maria@example.com,sms,en,true,true
+EXT-2002,James,Wu,1980-01-05,M,+15550002002,james@example.com,email,en,false,true
+EXT-2003,,MissingFirstName,1990-01-01,F,,,,en,,

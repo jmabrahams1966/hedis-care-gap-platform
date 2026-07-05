@@ -53,6 +53,7 @@ class MemberCreate(BaseModel):
     first_name: str
     last_name: str
     date_of_birth: str  # YYYY-MM-DD
+    sex: str = "U"  # "F" | "M" | "U"
     phone: str = ""
     email: str = ""
     preferred_channel: str = "sms"
@@ -66,6 +67,7 @@ class MemberOut(BaseModel):
     external_member_id: str
     first_name: str
     last_name: str
+    sex: str
     alias: str
     preferred_channel: str
     consent_sms: bool
@@ -85,9 +87,14 @@ class MagicLinkVerify(BaseModel):
 
 
 class ScreeningSubmit(BaseModel):
+    """`responses` shape is measure-specific — each Measure module interprets its
+    own payload (see app/measures/*.py). Mental health expects
+    {"phq9": [...], "gad7": [...]}; breast cancer expects
+    {"has_completed": bool, "completed_date": str | None, "wants_scheduling_help": bool}.
+    """
+
     care_gap_id: str
-    phq9: list[int]
-    gad7: list[int] | None = None
+    responses: dict
 
 
 class CaseNoteCreate(BaseModel):
@@ -96,6 +103,7 @@ class CaseNoteCreate(BaseModel):
 
 class GapStatusUpdate(BaseModel):
     status: str
+    reason: str = ""
 
 
 class CareGapOut(BaseModel):

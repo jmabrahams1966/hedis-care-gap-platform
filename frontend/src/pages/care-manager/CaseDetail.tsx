@@ -9,10 +9,16 @@ interface InstrumentScore {
   safety_flag?: boolean;
 }
 
+interface BcsScore {
+  has_completed: boolean;
+  completed_date: string | null;
+  wants_scheduling_help: boolean;
+}
+
 interface Submission {
   submitted_at: string;
   safety_flag: boolean;
-  instrument_scores: { phq9: InstrumentScore; gad7: InstrumentScore | null };
+  instrument_scores: { phq9?: InstrumentScore; gad7?: InstrumentScore | null; bcs?: BcsScore };
 }
 
 interface Note {
@@ -55,10 +61,17 @@ export default function CaseDetail() {
     load();
   }
 
-  async function updateStatus(status: string) {
+  async function updateStatus(status: string, reason = "") {
     if (!gapId) return;
-    await api.patch(`/api/care-gaps/${gapId}/status`, { status }, staff?.token);
+    await api.patch(`/api/care-gaps/${gapId}/status`, { status, reason }, staff?.token);
     load();
+  }
+
+  function excludeGap() {
+    const reason = window.prompt(
+      "Reason for excluding this member from the measure denominator (required for your HEDIS auditor):"
+    );
+    if (reason && reason.trim()) updateStatus("excluded", reason.trim());
   }
 
   async function sendOutreach() {
@@ -93,12 +106,20 @@ export default function CaseDetail() {
             <strong>Follow-up due:</strong> {new Date(data.follow_up_due_at).toLocaleString()}
           </p>
         )}
+        {data.status === "excluded" && (
+          <p style={{ color: "var(--muted)" }}>
+            <strong>Excluded from denominator.</strong>
+          </p>
+        )}
         <div style={{ display: "flex", gap: 8 }}>
           <button className="btn secondary" onClick={sendOutreach} disabled={sendingOutreach}>
             {sendingOutreach ? "Sending…" : "Send outreach"}
           </button>
           <button className="btn" onClick={() => updateStatus("closed")}>
             Mark closed
+          </button>
+          <button className="btn danger" onClick={excludeGap}>
+            Exclude
           </button>
         </div>
       </div>
@@ -108,12 +129,23 @@ export default function CaseDetail() {
       {data.submissions.map((s, i) => (
         <div className="card" key={i}>
           <p>{new Date(s.submitted_at).toLocaleString()}</p>
-          <p>
-            PHQ-9: {s.instrument_scores.phq9.total} ({s.instrument_scores.phq9.severity})
-          </p>
+          {s.instrument_scores.phq9 && (
+            <p>
+              PHQ-9: {s.instrument_scores.phq9.total} ({s.instrument_scores.phq9.severity})
+            </p>
+          )}
           {s.instrument_scores.gad7 && (
             <p>
               GAD-7: {s.instrument_scores.gad7.total} ({s.instrument_scores.gad7.severity})
+            </p>
+          )}
+          {s.instrument_scores.bcs && (
+            <p>
+              Mammogram: {s.instrument_scores.bcs.has_completed ? "completed" : "not completed"}
+              {!s.instrument_scores.bcs.has_completed &&
+                (s.instrument_scores.bcs.wants_scheduling_help
+                  ? " — wants scheduling help"
+                  : " — declined scheduling help for now")}
             </p>
           )}
         </div>

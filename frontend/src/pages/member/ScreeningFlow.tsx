@@ -9,52 +9,50 @@ interface PendingGap {
   period: string;
 }
 
-type Step = "loading" | "none_due" | "phq9" | "gad7" | "submitting" | "safety" | "done" | "error";
+interface SubmitResult {
+  status: string;
+  safety_flag: boolean;
+  needs_follow_up: boolean;
+}
+
+type Outcome = "safety" | "done" | "help_scheduling";
 
 export default function ScreeningFlow() {
   const { member } = useSession();
-  const [step, setStep] = useState<Step>("loading");
+  const [loadState, setLoadState] = useState<"loading" | "none_due" | "ready" | "error">("loading");
   const [gap, setGap] = useState<PendingGap | null>(null);
-  const [phq9, setPhq9] = useState<number[]>(Array(PHQ9_ITEMS.length).fill(-1));
-  const [gad7, setGad7] = useState<number[]>(Array(GAD7_ITEMS.length).fill(-1));
-  const [error, setError] = useState("");
+  const [outcome, setOutcome] = useState<Outcome | null>(null);
 
   useEffect(() => {
     api
       .get<PendingGap[]>("/api/screenings/pending", member?.token)
       .then((gaps) => {
         if (gaps.length === 0) {
-          setStep("none_due");
+          setLoadState("none_due");
         } else {
           setGap(gaps[0]);
-          setStep("phq9");
+          setLoadState("ready");
         }
       })
-      .catch(() => setStep("error"));
+      .catch(() => setLoadState("error"));
   }, [member]);
 
-  async function submit(finalGad7: number[]) {
-    if (!gap) return;
-    setStep("submitting");
-    try {
-      const res = await api.post<{ status: string; safety_flag: boolean; needs_follow_up: boolean }>(
-        "/api/screenings",
-        { care_gap_id: gap.care_gap_id, phq9, gad7: finalGad7 },
-        member?.token
-      );
-      setStep(res.safety_flag ? "safety" : "done");
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not submit. Please try again.");
-      setStep("gad7");
-    }
+  async function submit(responses: Record<string, unknown>): Promise<SubmitResult> {
+    if (!gap) throw new Error("No care gap loaded");
+    return api.post<SubmitResult>(
+      "/api/screenings",
+      { care_gap_id: gap.care_gap_id, responses },
+      member?.token
+    );
   }
 
-  if (step === "loading") return <Shell>Loading…</Shell>;
-  if (step === "error") return <Shell>Something went wrong. Please refresh or use the link we sent again.</Shell>;
-  if (step === "none_due")
+  if (loadState === "loading") return <Shell>Loading…</Shell>;
+  if (loadState === "error")
+    return <Shell>Something went wrong. Please refresh or use the link we sent again.</Shell>;
+  if (loadState === "none_due")
     return <Shell>You're all caught up — thanks! There's nothing due for you right now.</Shell>;
 
-  if (step === "safety") {
+  if (outcome === "safety") {
     return (
       <div className="app-shell">
         <div className="safety-card">
@@ -74,8 +72,51 @@ export default function ScreeningFlow() {
     );
   }
 
-  if (step === "done") {
-    return <Shell>Thanks, {member?.firstName}! Your check-in is complete. A care team member may follow up if needed.</Shell>;
+  if (outcome === "help_scheduling") {
+    return <Shell>Thanks! A care manager from your health plan will reach out soon to help you schedule.</Shell>;
+  }
+
+  if (outcome === "done") {
+    return (
+      <Shell>
+        Thanks, {member?.firstName}! Your check-in is complete. A care team member may follow up if needed.
+      </Shell>
+    );
+  }
+
+  if (gap?.measure_code === "breast_cancer") {
+    return <BreastCancerFlow onSubmit={submit} onOutcome={setOutcome} />;
+  }
+  return <MentalHealthFlow onSubmit={submit} onOutcome={setOutcome} />;
+}
+
+function Shell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="app-shell">
+      <div className="card">{children}</div>
+    </div>
+  );
+}
+
+function MentalHealthFlow({
+  onSubmit,
+  onOutcome,
+}: {
+  onSubmit: (responses: Record<string, unknown>) => Promise<SubmitResult>;
+  onOutcome: (o: Outcome) => void;
+}) {
+  const [step, setStep] = useState<"phq9" | "gad7">("phq9");
+  const [phq9, setPhq9] = useState<number[]>(Array(PHQ9_ITEMS.length).fill(-1));
+  const [gad7, setGad7] = useState<number[]>(Array(GAD7_ITEMS.length).fill(-1));
+  const [error, setError] = useState("");
+
+  async function handleFinalSubmit(finalGad7: number[]) {
+    try {
+      const res = await onSubmit({ phq9, gad7: finalGad7 });
+      onOutcome(res.safety_flag ? "safety" : "done");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not submit. Please try again.");
+    }
   }
 
   if (step === "phq9") {
@@ -102,17 +143,101 @@ export default function ScreeningFlow() {
         items={GAD7_ITEMS}
         answers={gad7}
         onChange={setGad7}
-        onNext={() => submit(gad7)}
+        onNext={() => handleFinalSubmit(gad7)}
         submitLabel="Submit"
       />
     </div>
   );
 }
 
-function Shell({ children }: { children: React.ReactNode }) {
+function BreastCancerFlow({
+  onSubmit,
+  onOutcome,
+}: {
+  onSubmit: (responses: Record<string, unknown>) => Promise<SubmitResult>;
+  onOutcome: (o: Outcome) => void;
+}) {
+  const [hasCompleted, setHasCompleted] = useState<boolean | null>(null);
+  const [wantsHelp, setWantsHelp] = useState<boolean | null>(null);
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function finish() {
+    setSubmitting(true);
+    setError("");
+    try {
+      await onSubmit({ has_completed: hasCompleted, wants_scheduling_help: wantsHelp ?? false });
+      onOutcome(!hasCompleted && wantsHelp ? "help_scheduling" : "done");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not submit. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return (
     <div className="app-shell">
-      <div className="card">{children}</div>
+      {error && <p className="error-text">{error}</p>}
+      <div className="card">
+        <p>Have you had a mammogram (breast cancer screening) in the last 2 years?</p>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 400 }}>
+          <input
+            type="radio"
+            style={{ width: "auto" }}
+            name="has_completed"
+            checked={hasCompleted === true}
+            onChange={() => {
+              setHasCompleted(true);
+              setWantsHelp(null);
+            }}
+          />
+          Yes, I've had one
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 400 }}>
+          <input
+            type="radio"
+            style={{ width: "auto" }}
+            name="has_completed"
+            checked={hasCompleted === false}
+            onChange={() => setHasCompleted(false)}
+          />
+          No, not yet
+        </label>
+      </div>
+
+      {hasCompleted === false && (
+        <div className="card">
+          <p>Would you like help scheduling one?</p>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 400 }}>
+            <input
+              type="radio"
+              style={{ width: "auto" }}
+              name="wants_help"
+              checked={wantsHelp === true}
+              onChange={() => setWantsHelp(true)}
+            />
+            Yes, please have someone reach out
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 400 }}>
+            <input
+              type="radio"
+              style={{ width: "auto" }}
+              name="wants_help"
+              checked={wantsHelp === false}
+              onChange={() => setWantsHelp(false)}
+            />
+            No thanks, not right now
+          </label>
+        </div>
+      )}
+
+      <button
+        className="btn"
+        disabled={submitting || hasCompleted === null || (hasCompleted === false && wantsHelp === null)}
+        onClick={finish}
+      >
+        {submitting ? "Submitting…" : "Submit"}
+      </button>
     </div>
   );
 }

@@ -17,5 +17,8 @@ async def get_db():
 
 
 async def init_db():
+    """Dev convenience only — creates any missing tables against local SQLite on
+    startup. Production schema changes go through Alembic (`backend/migrations/`),
+    run explicitly as a deploy step, not on every app boot."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

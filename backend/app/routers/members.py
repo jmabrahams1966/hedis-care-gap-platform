@@ -1,7 +1,10 @@
+import csv
 import hashlib
+import io
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -57,6 +60,28 @@ async def _open_care_gaps_for_member(db: AsyncSession, member: Member) -> None:
             )
 
 
+async def _create_member(db: AsyncSession, tenant_id: str, item: MemberCreate) -> Member:
+    member = Member(
+        tenant_id=tenant_id,
+        external_member_id=item.external_member_id,
+        first_name=item.first_name,
+        last_name=item.last_name,
+        date_of_birth=item.date_of_birth,
+        sex=item.sex,
+        phone=item.phone,
+        email=item.email,
+        preferred_channel=item.preferred_channel,
+        preferred_language=item.preferred_language,
+        consent_sms=item.consent_sms,
+        consent_email=item.consent_email,
+    )
+    member.alias = _alias(tenant_id, item.external_member_id)
+    db.add(member)
+    await db.flush()
+    await _open_care_gaps_for_member(db, member)
+    return member
+
+
 @router.post("", response_model=MemberOut)
 async def create_member(
     body: MemberCreate,
@@ -65,26 +90,8 @@ async def create_member(
 ):
     if staff.role != StaffRole.super_admin.value and staff.tenant_id is None:
         raise HTTPException(403, "Staff user has no tenant")
-    tenant_id = staff.tenant_id
 
-    member = Member(
-        tenant_id=tenant_id,
-        external_member_id=body.external_member_id,
-        first_name=body.first_name,
-        last_name=body.last_name,
-        date_of_birth=body.date_of_birth,
-        phone=body.phone,
-        email=body.email,
-        preferred_channel=body.preferred_channel,
-        preferred_language=body.preferred_language,
-        consent_sms=body.consent_sms,
-        consent_email=body.consent_email,
-    )
-    member.alias = _alias(tenant_id, body.external_member_id)
-    db.add(member)
-    await db.flush()
-
-    await _open_care_gaps_for_member(db, member)
+    member = await _create_member(db, staff.tenant_id, body)
     await db.commit()
     await db.refresh(member)
     return member
@@ -97,30 +104,55 @@ async def bulk_create_members(
     db: AsyncSession = Depends(get_db),
 ):
     """Roster ingestion endpoint — accepts a batch from the payer's eligibility feed."""
-    created = []
-    for item in body:
-        member = Member(
-            tenant_id=staff.tenant_id,
-            external_member_id=item.external_member_id,
-            first_name=item.first_name,
-            last_name=item.last_name,
-            date_of_birth=item.date_of_birth,
-            phone=item.phone,
-            email=item.email,
-            preferred_channel=item.preferred_channel,
-            preferred_language=item.preferred_language,
-            consent_sms=item.consent_sms,
-            consent_email=item.consent_email,
-        )
-        member.alias = _alias(staff.tenant_id, item.external_member_id)
-        db.add(member)
-        await db.flush()
-        await _open_care_gaps_for_member(db, member)
-        created.append(member)
+    created = [await _create_member(db, staff.tenant_id, item) for item in body]
     await db.commit()
     for member in created:
         await db.refresh(member)
     return created
+
+
+CSV_BOOL_TRUE = {"1", "true", "yes", "y"}
+
+
+@router.post("/bulk-csv")
+async def bulk_create_members_csv(
+    file: UploadFile,
+    staff: StaffUser = Depends(require_role(StaffRole.payer_admin.value, StaffRole.super_admin.value)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Roster ingestion from a CSV eligibility feed. Expected columns:
+    external_member_id, first_name, last_name, date_of_birth (YYYY-MM-DD), sex (F/M/U),
+    phone, email, preferred_channel (sms/email), preferred_language, consent_sms, consent_email
+    (consent columns accept 1/true/yes as truthy). Unknown/missing optional columns fall back
+    to MemberCreate's defaults.
+    """
+    raw = (await file.read()).decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(raw))
+
+    created: list[Member] = []
+    errors: list[dict] = []
+    for row_num, row in enumerate(reader, start=2):  # header is row 1
+        row = {k: (v or "").strip() for k, v in row.items()}
+        for bool_field in ("consent_sms", "consent_email"):
+            if bool_field in row:
+                row[bool_field] = row[bool_field].lower() in CSV_BOOL_TRUE
+        row = {k: v for k, v in row.items() if v != "" or k in ("consent_sms", "consent_email")}
+        try:
+            item = MemberCreate(**row)
+        except ValidationError as e:
+            errors.append({"row": row_num, "external_member_id": row.get("external_member_id", ""), "error": str(e)})
+            continue
+        created.append(await _create_member(db, staff.tenant_id, item))
+
+    await db.commit()
+    for member in created:
+        await db.refresh(member)
+
+    return {
+        "created": len(created),
+        "errors": errors,
+        "members": [MemberOut.model_validate(m) for m in created],
+    }
 
 
 @router.get("", response_model=list[MemberOut])

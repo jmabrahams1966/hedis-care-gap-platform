@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,7 +30,7 @@ async def queue(
     if status:
         stmt = stmt.where(CareGap.status == status)
     else:
-        stmt = stmt.where(CareGap.status != GapStatus.closed.value)
+        stmt = stmt.where(CareGap.status.notin_([GapStatus.closed.value, GapStatus.excluded.value]))
 
     stmt = stmt.order_by(
         case((CareGap.safety_flag.is_(True), 0), else_=1),
@@ -97,8 +99,17 @@ async def update_status(
         raise HTTPException(404, "Not found")
     if body.status not in {s.value for s in GapStatus}:
         raise HTTPException(422, "Invalid status")
+    if body.status == GapStatus.excluded.value and not body.reason.strip():
+        raise HTTPException(422, "An exclusion reason is required — it's what your HEDIS auditor will ask for")
 
     gap.status = body.status
+    if body.status in (GapStatus.closed.value, GapStatus.excluded.value):
+        gap.closed_at = datetime.utcnow()
+        gap.closure_reason = body.reason.strip() or "closed_by_staff"
+    else:
+        gap.closed_at = None
+        gap.closure_reason = ""
+
     await log_action(
         db,
         actor_type="staff",
@@ -108,7 +119,7 @@ async def update_status(
         resource_id=gap.id,
         tenant_id=staff.tenant_id,
         ip_address=client_ip(request),
-        metadata={"new_status": body.status},
+        metadata={"new_status": body.status, "reason": body.reason},
     )
     await db.commit()
     return {"id": gap.id, "status": gap.status}

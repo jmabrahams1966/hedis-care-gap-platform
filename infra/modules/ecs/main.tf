@@ -216,3 +216,101 @@ resource "aws_appautoscaling_policy" "cpu" {
     target_value = 60
   }
 }
+
+# --- Scheduled outreach batch job ---
+#
+# A separate task definition (same image, fixed command) rather than a
+# per-invocation container override — EventBridge Scheduler's ECS target
+# doesn't support overriding the container command, only which task
+# definition/network config to run.
+resource "aws_ecs_task_definition" "cron" {
+  family                   = "${var.project_name}-outreach-cron"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = 256
+  memory                   = 512
+  execution_role_arn       = aws_iam_role.execution.arn
+  task_role_arn            = aws_iam_role.task.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "outreach-cron"
+      image     = var.container_image
+      essential = true
+      command   = ["python", "-m", "app.scripts.run_outreach_cron"]
+      environment = [
+        for k, v in var.environment_variables : { name = k, value = v }
+      ]
+      secrets = [
+        { name = "DATABASE_URL", valueFrom = var.database_url_secret_arn },
+        { name = "JWT_SECRET", valueFrom = "${var.app_secrets_arn}:jwt_secret::" },
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.this.name
+          "awslogs-region"        = data.aws_region.current.name
+          "awslogs-stream-prefix" = "outreach-cron"
+        }
+      }
+    }
+  ])
+}
+
+data "aws_iam_policy_document" "scheduler_assume" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["scheduler.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "scheduler" {
+  name               = "${var.project_name}-outreach-scheduler"
+  assume_role_policy = data.aws_iam_policy_document.scheduler_assume.json
+}
+
+data "aws_iam_policy_document" "scheduler_run_task" {
+  statement {
+    actions   = ["ecs:RunTask"]
+    resources = [replace(aws_ecs_task_definition.cron.arn, "/:\\d+$/", ":*")]
+  }
+  statement {
+    actions   = ["iam:PassRole"]
+    resources = [aws_iam_role.execution.arn, aws_iam_role.task.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "scheduler_run_task" {
+  name   = "${var.project_name}-scheduler-run-task"
+  role   = aws_iam_role.scheduler.id
+  policy = data.aws_iam_policy_document.scheduler_run_task.json
+}
+
+resource "aws_scheduler_schedule" "outreach_cron" {
+  name                = "${var.project_name}-outreach-cron"
+  schedule_expression = var.outreach_cron_schedule
+
+  flexible_time_window {
+    mode = "OFF"
+  }
+
+  target {
+    arn      = aws_ecs_cluster.this.arn
+    role_arn = aws_iam_role.scheduler.arn
+
+    ecs_parameters {
+      task_definition_arn = aws_ecs_task_definition.cron.arn
+      launch_type         = "FARGATE"
+      task_count          = 1
+
+      network_configuration {
+        subnets          = var.private_subnet_ids
+        security_groups  = [var.ecs_tasks_security_group_id]
+        assign_public_ip = false
+      }
+    }
+  }
+}

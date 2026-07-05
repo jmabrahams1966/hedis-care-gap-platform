@@ -45,8 +45,8 @@ async def submit_screening(
 
     measure = get_measure(gap.measure_code)
     try:
-        evaluation = measure.evaluate_submission({"phq9": body.phq9, "gad7": body.gad7})
-    except ValueError as e:
+        evaluation = measure.evaluate_submission(body.responses)
+    except (ValueError, KeyError) as e:
         raise HTTPException(422, str(e))
 
     submission = ScreeningSubmission(
@@ -58,16 +58,21 @@ async def submit_screening(
     )
     db.add(submission)
 
-    gap.numerator_met = True
+    gap.numerator_met = evaluation["numerator_met"]
     gap.safety_flag = evaluation["safety_flag"]
     window_days = measure.follow_up_window_days(evaluation)
     if window_days is not None:
         gap.status = GapStatus.needs_follow_up.value
         gap.follow_up_due_at = datetime.utcnow() + timedelta(days=window_days)
-    else:
+    elif gap.numerator_met:
         gap.status = GapStatus.completed.value
         gap.closed_at = datetime.utcnow()
-        gap.closure_reason = "screening_completed_no_follow_up_needed"
+        gap.closure_reason = "numerator_met"
+    else:
+        # Member responded but the numerator isn't met and no follow-up window
+        # applies (e.g. BCS: hasn't been screened, doesn't want scheduling help
+        # yet) — leave the gap open so normal outreach cadence keeps nudging.
+        gap.status = GapStatus.open.value
 
     await log_action(
         db,

@@ -72,3 +72,9 @@ variable "environment_variables" {
   description = "Non-secret env vars for the backend container"
   type        = map(string)
 }
+
+variable "outreach_cron_schedule" {
+  description = "EventBridge Scheduler expression for the outreach batch job"
+  type        = string
+  default     = "rate(1 day)"
+}

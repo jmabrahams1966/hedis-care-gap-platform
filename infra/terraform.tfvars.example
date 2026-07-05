@@ -17,3 +17,7 @@ sms_origination_phone  = "" # fill in after AWS End User Messaging origination n
 db_min_capacity = 0.5
 db_max_capacity = 4
 desired_count   = 2
+
+# EventBridge Scheduler expression for the outreach batch job (see
+# backend/app/scripts/run_outreach_cron.py). Default: once a day.
+outreach_cron_schedule = "rate(1 day)"

@@ -23,7 +23,7 @@ measure specification.
 - [ ] Confirm whether your plan's DSF reporting requires a *specific* standardized
       depression screening tool roster, or accepts PHQ-9 generally
 
-## 2. Thresholds, eligibility & follow-up window (review each)
+### Thresholds, eligibility & follow-up window (review each)
 
 Everything below is a defensible starting heuristic implemented in
 `backend/app/measures/mental_health.py` and `backend/app/scoring.py` — **not an
@@ -43,7 +43,7 @@ empirically validated or NCQA-audited model.**
       numerator logic (some HEDIS measures require the follow-up step itself for
       full credit, not just the screening)
 
-## 3. Safety & escalation
+### Safety & escalation
 
 - [ ] Define the **real-time escalation pathway** for PHQ-9 item-9 positives
       (named responsible clinician(s)/care manager on-call routing, response SLA)
@@ -54,19 +54,33 @@ empirically validated or NCQA-audited model.**
 - [ ] Confirm consent language (`backend/app/notifications/templates.py`,
       SMS opt-out footer) against TCPA and your state's requirements
 
-## 4. Reporting & submission
+## 2. Measure implemented: Breast Cancer Screening (BCS)
 
-- [ ] Confirm `GET /api/reports/hedis` numerator/denominator logic against your
-      HEDIS auditor's expectations before using it for any real submission
-      (currently: denominator = every care-gap row for the period not excluded;
-      numerator = screening completed)
-- [ ] Determine whether this platform's data needs to feed a HEDIS supplemental
-      data submission to the payer's primary quality reporting system, or is the
-      system of record itself
-- [ ] Build the exclusion workflow (`GapStatus.excluded`) — currently a status
-      value exists but nothing in the UI sets it yet
+Implemented in `backend/app/measures/breast_cancer.py`. Structurally different
+from DSF: no licensed instrument, no self-administered questionnaire — it's a
+completion-confirmation + scheduling-assistance flow.
 
-## 5. Sign-off
+- [ ] Obtain the current NCQA HEDIS BCS measure specification and confirm
+      eligible population, exclusions, and measurement period (commonly a
+      27-month lookback, not a calendar year — `CareGap.period` here is
+      currently just the calendar year, which **does not** match BCS's actual
+      lookback window; fix before relying on this for a real submission)
+- [ ] Eligibility as implemented: female members aged 50-74 (`is_eligible`) —
+      confirm against the actual measure's age band and any exclusions
+      (e.g. bilateral mastectomy)
+- [ ] **Numerator source** — this module currently accepts **member self-report**
+      ("I've had a mammogram") as numerator-met. Real HEDIS BCS numerator credit
+      is normally driven by **claims/encounter data**, not self-report. Decide
+      whether self-report is acceptable as an interim/soft signal only, or
+      whether numerator credit must be gated on a claims feed reconciliation
+      step before this measure's rate is reported anywhere official.
+- [ ] `Member.sex` is currently a simple F/M/U field populated at roster
+      ingestion — confirm the payer's eligibility feed is the right source of
+      truth for this, not member self-report, for measure eligibility purposes
+- [ ] Scheduling-help follow-up window (14 days) — confirm against your care
+      management team's actual SLA for reaching out to help schedule
+
+## 3. Sign-off
 
 | Role | Name | Signature | Date |
 |---|---|---|---|
@@ -79,17 +93,31 @@ empirically validated or NCQA-audited model.**
 > protocols with a licensed clinical supervisor, your HEDIS auditor, and legal
 > counsel before any real member outreach.
 
-## 6. Adding a new measure module
+## 4. Reporting & submission
 
-To add a measure beyond mental health (e.g. Breast Cancer Screening, BCS):
+- [ ] Confirm `GET /api/reports/hedis` numerator/denominator logic against your
+      HEDIS auditor's expectations before using it for any real submission
+      (currently: denominator = every care-gap row for the period not excluded;
+      numerator = per-measure `numerator_met`, see each measure's module)
+- [ ] Determine whether this platform's data needs to feed a HEDIS supplemental
+      data submission to the payer's primary quality reporting system, or is the
+      system of record itself
+- [ ] Build the exclusion workflow (`GapStatus.excluded`) — currently a status
+      value exists but nothing in the UI sets it yet
+- [ ] Fix `CareGap.period` to be measure-appropriate (calendar year works for
+      DSF; BCS needs a rolling/lookback period, not a fixed year)
+
+## 5. Adding a new measure module
+
+To add a measure beyond mental health and breast cancer screening:
 
 1. Implement `Measure` (`backend/app/measures/base.py`): `is_eligible`,
    `evaluate_submission`, `follow_up_window_days`.
 2. Register it in `backend/app/measures/__init__.py`.
-3. Add a row to this document with its own instrument-licensing and
-   threshold table before enabling it for any real tenant.
-4. Note: not every measure is "screen the member yourself" — BCS, for example,
-   is usually "confirm you scheduled/completed a mammogram," which needs a
-   scheduling/confirmation flow and often claims-based numerator credit rather
-   than a self-reported instrument. Don't force every future measure through
-   the PHQ-9-shaped questionnaire flow.
+3. Add a section to this document with its own instrument-licensing/eligibility/
+   numerator-source table before enabling it for any real tenant.
+4. Decide the numerator source up front — self-report (like BCS here), a
+   structured instrument (like DSF here), or claims/encounter data — and be
+   explicit in this doc about which one and why, since that decision drives
+   whether the measure's HEDIS rate can be reported as-is or needs claims
+   reconciliation first.

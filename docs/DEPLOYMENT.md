@@ -82,7 +82,10 @@ psql "$DATABASE_URL" -c "
 ```
 
 Then use `POST /api/tenants` (as that super_admin) to create the first real
-health plan tenant, and `POST /api/members/bulk` to load its member roster.
+health plan tenant, and either `POST /api/members/bulk` (JSON array) or
+`POST /api/members/bulk-csv` (multipart file upload, columns documented in
+`backend/app/routers/members.py` and `backend/sample_roster.csv`) to load its
+member roster from the payer's eligibility feed.
 
 ## 6. Deploy the frontend
 
@@ -104,19 +107,29 @@ aws cloudfront create-invalidation --distribution-id <from terraform output> --p
 
 ## 8. Ongoing outreach cadence
 
-`POST /api/outreach/run-batch` sends outreach for every gap due for (re)contact
-for the calling admin's tenant. This needs to run on a schedule, not be
-triggered manually — add an EventBridge Scheduler rule invoking an ECS
-Scheduled Task (or a small Lambda that calls the endpoint with a service-role
-JWT) on whatever cadence fits your outreach cadence (daily is a reasonable
-start). Not yet in Terraform — add it once you've validated the manual flow.
+`POST /api/outreach/run-batch` sends outreach for one tenant on demand (useful
+for testing). Production outreach runs automatically: `infra/modules/ecs`
+provisions an EventBridge Scheduler rule (`outreach_cron_schedule` in
+`terraform.tfvars`, default daily) that runs a dedicated ECS task —
+`python -m app.scripts.run_outreach_cron` — which iterates every tenant and
+sends outreach for every gap due for (re)contact. Check CloudWatch Logs under
+`/ecs/<project_name>` (stream prefix `outreach-cron`) to confirm it's actually
+firing once deployed.
 
 ## Rollback / redeploy
 
 - **Backend**: push a new image tag, update `container_image` in
   `terraform.tfvars`, `terraform apply` — ECS does a rolling deployment
 - **Frontend**: rebuild, re-sync to S3, re-invalidate CloudFront
-- **Database migrations**: this scaffold uses `Base.metadata.create_all` on
-  startup (see `backend/app/db.py::init_db`), which only adds new tables, never
-  alters existing ones. Introduce Alembic (already in `requirements.txt`)
-  before your first schema change against real data.
+- **Database migrations**: Alembic is set up (`backend/migrations/`, initial
+  revision already generated). Run migrations explicitly against production —
+  don't rely on `init_db()`'s `create_all`, which only ever adds tables and is
+  a dev-only convenience for local SQLite:
+  ```bash
+  cd backend
+  DATABASE_URL=postgresql+asyncpg://... ./.venv/bin/alembic upgrade head
+  ```
+  Run this once against the new Aurora cluster before the first ECS deploy,
+  and again after `alembic revision --autogenerate -m "..."` for any future
+  schema change — as a manual step or a one-off ECS task, not baked into the
+  app's normal startup path.

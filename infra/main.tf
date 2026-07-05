@@ -64,6 +64,7 @@ module "ecs" {
   kms_key_arn                   = module.secrets.kms_key_arn
   database_url_secret_arn       = aws_secretsmanager_secret.database_url.arn
   app_secrets_arn               = module.secrets.app_secrets_arn
+  outreach_cron_schedule        = var.outreach_cron_schedule
 
   environment_variables = {
     DEV_MODE                = "false"

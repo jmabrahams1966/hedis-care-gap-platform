@@ -1,0 +1,87 @@
+"""Outreach sending logic shared between the authenticated API endpoints
+(app/routers/outreach.py) and the scheduled batch job (app/scripts/run_outreach_cron.py).
+Kept separate from the router so the cron entrypoint doesn't need a fake staff
+JWT to call into it.
+"""
+
+from datetime import datetime, timedelta
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from .models import CareGap, GapStatus, MagicToken, Member, OutreachAttempt, OutreachStatus, Tenant
+from .notifications.email_service import send_email
+from .notifications.sms_service import send_sms
+from .notifications.templates import (
+    screening_invite_email_body,
+    screening_invite_email_subject,
+    screening_invite_sms,
+)
+from .security import generate_magic_token, magic_token_expiry
+
+RETRY_CADENCE_DAYS = 7
+
+
+async def send_to_member(db: AsyncSession, tenant: Tenant, member: Member, gap: CareGap) -> OutreachAttempt:
+    raw_token, token_hash = generate_magic_token()
+    db.add(
+        MagicToken(member_id=member.id, token_hash=token_hash, purpose="screening", expires_at=magic_token_expiry())
+    )
+    link = f"https://app.example.com/verify?token={raw_token}"
+
+    channel = "sms" if (member.preferred_channel == "sms" and member.consent_sms and member.phone) else "email"
+    if channel == "sms":
+        message_id = send_sms(member.phone, screening_invite_sms(tenant.name, link))
+    elif member.consent_email and member.email:
+        message_id = send_email(
+            member.email,
+            screening_invite_email_subject(tenant.name),
+            screening_invite_email_body(tenant.name, member.first_name, link),
+        )
+    else:
+        attempt = OutreachAttempt(
+            care_gap_id=gap.id,
+            member_id=member.id,
+            channel=member.preferred_channel,
+            template_code="screening_invite",
+            status=OutreachStatus.failed.value,
+            error="No consent on file for any contact channel",
+        )
+        db.add(attempt)
+        return attempt
+
+    attempt = OutreachAttempt(
+        care_gap_id=gap.id,
+        member_id=member.id,
+        channel=channel,
+        template_code="screening_invite",
+        status=OutreachStatus.sent.value,
+        provider_message_id=message_id,
+    )
+    db.add(attempt)
+    return attempt
+
+
+async def run_batch_for_tenant(db: AsyncSession, tenant: Tenant) -> dict:
+    """Sends outreach for every one of this tenant's open gaps due for (re)contact."""
+    now = datetime.utcnow()
+    res = await db.execute(
+        select(CareGap).where(
+            CareGap.tenant_id == tenant.id,
+            CareGap.status.in_([GapStatus.open.value, GapStatus.outreach_sent.value]),
+            (CareGap.next_outreach_at.is_(None)) | (CareGap.next_outreach_at <= now),
+        )
+    )
+    gaps = res.scalars().all()
+
+    sent = 0
+    for gap in gaps:
+        member = await db.get(Member, gap.member_id)
+        attempt = await send_to_member(db, tenant, member, gap)
+        if attempt.status == OutreachStatus.sent.value:
+            gap.status = GapStatus.outreach_sent.value
+            gap.last_outreach_at = now
+            gap.next_outreach_at = now + timedelta(days=RETRY_CADENCE_DAYS)
+            sent += 1
+    await db.commit()
+    return {"tenant_id": tenant.id, "tenant_slug": tenant.slug, "evaluated": len(gaps), "sent": sent}

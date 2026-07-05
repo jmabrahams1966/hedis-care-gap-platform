@@ -93,3 +93,9 @@ variable "sms_origination_phone" {
   type        = string
   default     = ""
 }
+
+variable "outreach_cron_schedule" {
+  description = "EventBridge Scheduler expression for the outreach batch job (see backend/app/scripts/run_outreach_cron.py)"
+  type        = string
+  default     = "rate(1 day)"
+}

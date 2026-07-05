@@ -2,7 +2,8 @@
 
 Provisions the full AWS stack: VPC (public/private subnets across 2 AZs, NAT), Aurora
 Serverless v2 Postgres (encrypted, private), ECS Fargate service behind an ALB running the
-FastAPI backend, S3 + CloudFront for the static frontend, Route 53 records, ACM certificates,
+FastAPI backend, an EventBridge Scheduler + dedicated ECS task running the outreach batch job
+on a cadence, S3 + CloudFront for the static frontend, Route 53 records, ACM certificates,
 KMS encryption key, and Secrets Manager entries for DB credentials / JWT secret.
 
 **Not applied yet** — this is code only. Applying it creates real, billable AWS resources.
