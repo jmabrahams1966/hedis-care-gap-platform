@@ -10,3 +10,4 @@ dist/
 *.tfstate.backup
 .terraform/
 .terraform.lock.hcl
+infra/terraform.tfvars
