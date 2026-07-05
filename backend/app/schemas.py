@@ -1,0 +1,112 @@
+from datetime import datetime
+
+from pydantic import BaseModel, EmailStr
+
+
+class TenantCreate(BaseModel):
+    slug: str
+    name: str
+    primary_color: str = "#0d6efd"
+    support_phone: str = ""
+    support_email: str = ""
+    enabled_measures: list[str] = ["mental_health"]
+    first_admin_email: EmailStr | None = None
+    first_admin_password: str | None = None
+
+
+class TenantOut(BaseModel):
+    id: str
+    slug: str
+    name: str
+    primary_color: str
+    member_count: int = 0
+    open_gaps: int = 0
+
+    class Config:
+        from_attributes = True
+
+
+class MeasureToggle(BaseModel):
+    measure_code: str
+    enabled: bool
+    config: dict = {}
+
+
+class StaffLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class StaffOut(BaseModel):
+    id: str
+    email: str
+    role: str
+    name: str
+    tenant_id: str | None
+
+    class Config:
+        from_attributes = True
+
+
+class MemberCreate(BaseModel):
+    external_member_id: str
+    first_name: str
+    last_name: str
+    date_of_birth: str  # YYYY-MM-DD
+    phone: str = ""
+    email: str = ""
+    preferred_channel: str = "sms"
+    preferred_language: str = "en"
+    consent_sms: bool = False
+    consent_email: bool = False
+
+
+class MemberOut(BaseModel):
+    id: str
+    external_member_id: str
+    first_name: str
+    last_name: str
+    alias: str
+    preferred_channel: str
+    consent_sms: bool
+    consent_email: bool
+
+    class Config:
+        from_attributes = True
+
+
+class MagicLinkRequest(BaseModel):
+    external_member_id: str
+    date_of_birth: str
+
+
+class MagicLinkVerify(BaseModel):
+    token: str
+
+
+class ScreeningSubmit(BaseModel):
+    care_gap_id: str
+    phq9: list[int]
+    gad7: list[int] | None = None
+
+
+class CaseNoteCreate(BaseModel):
+    note: str
+
+
+class GapStatusUpdate(BaseModel):
+    status: str
+
+
+class CareGapOut(BaseModel):
+    id: str
+    measure_code: str
+    period: str
+    status: str
+    safety_flag: bool
+    numerator_met: bool
+    follow_up_due_at: datetime | None
+    member_alias: str
+
+    class Config:
+        from_attributes = True

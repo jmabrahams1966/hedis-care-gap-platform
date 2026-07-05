@@ -1,0 +1,19 @@
+# Copy to terraform.tfvars and fill in before `terraform apply`.
+
+domain_name  = "example.com"       # the domain you claim in Route 53
+app_subdomain = "app"              # -> app.example.com (frontend)
+api_subdomain = "api"              # -> api.example.com (backend)
+
+# Set true only if Route 53 doesn't already host this domain's zone (e.g. the
+# domain is registered elsewhere and you're delegating DNS to Route 53).
+create_hosted_zone = false
+
+# Build and push the backend image first: see docs/DEPLOYMENT.md
+container_image = "123456789012.dkr.ecr.us-east-1.amazonaws.com/hedis-care-gap:latest"
+
+ses_from_email         = "no-reply@app.example.com"
+sms_origination_phone  = "" # fill in after AWS End User Messaging origination number is provisioned/verified
+
+db_min_capacity = 0.5
+db_max_capacity = 4
+desired_count   = 2
