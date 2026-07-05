@@ -78,10 +78,22 @@ python3.12 -m venv .venv
 ./.venv/bin/pip install -r requirements.txt
 ./.venv/bin/python -m uvicorn app.main:app --reload --port 8099
 ```
-No `.env` needed for dev — SQLite + `dev_mode=true`, seeds a `demo` tenant with 5
+No `.env` needed for dev — SQLite + `dev_mode=true`, seeds a `demo` tenant with 7
 synthetic members and 3 staff accounts (see `backend/app/seed.py` for credentials)
 on first boot. In dev mode, magic-link tokens are returned in the API response
 instead of being texted/emailed, and outreach sends are logged, not dispatched.
+
+**Tests**
+```bash
+cd backend
+./.venv/bin/pip install -r requirements-dev.txt
+./.venv/bin/python -m pytest tests/ -v
+```
+Unit tests for scoring (`tests/test_scoring.py`) and both measure modules
+(`tests/test_measures.py`) need no DB. `tests/test_api_flow.py` drives the FastAPI
+app end-to-end over `httpx.ASGITransport` against a throwaway SQLite file —
+tenant/member creation, magic-link auth, both measure flows, exclusions, and the
+HEDIS report.
 
 **Frontend**
 ```bash
