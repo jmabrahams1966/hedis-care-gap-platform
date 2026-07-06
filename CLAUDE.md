@@ -44,7 +44,7 @@ their data onto an adult `Member` row.
 ## Current status
 
 - **Backend**: FastAPI + async SQLAlchemy. Fully working locally (SQLite,
-  dev_mode). 59 passing tests (`backend/tests/`). Alembic wired up
+  dev_mode). 71 passing tests (`backend/tests/`). Alembic wired up
   (`backend/migrations/`) with three migrations generated (initial schema,
   `Member.conditions`, then the `Dependent` table + `CareGap.dependent_id`).
 - **Frontend**: React + TS + Vite. Redesigned UI (design system, shared nav,
@@ -57,6 +57,35 @@ their data onto an adult `Member` row.
   has the real domain wired in but is gitignored (per-deployment values,
   not committed) — **you'll need to recreate it locally**, see
   "Recreating terraform.tfvars" below.
+- **Inbound SMS webhook**: `POST /api/webhooks/sms-inbound` now handles
+  STOP/START keyword replies with real AWS SNS signature verification
+  (`backend/app/notifications/sns_verify.py`) — not a stub. `infra/modules/
+  messaging` provisions the SNS topic + HTTPS subscription + configuration
+  set; the origination phone number's two-way channel still needs a manual
+  `aws pinpoint-sms-voice-v2` call after `terraform apply` (see
+  `docs/DEPLOYMENT.md` §2 step 4 — deliberately not Terraform-managed, see
+  the comment in `infra/modules/messaging/main.tf`).
+
+## Possible first partner: St. Vincent's / USFHP
+
+You mentioned St. Vincent's/USFHP as a likely first partner. Verified via
+web search: **St. Vincent Catholic Medical Centers (SVCMC)** is one of the
+designated provider organizations for **USFHP (US Family Health Plan)**, a
+TRICARE Prime option for military families/retirees, serving NY metro, NJ,
+SE Pennsylvania, and Western Connecticut. A few implications worth keeping in
+mind as this becomes concrete, not yet acted on:
+
+- Military/dependent-heavy population → CIS and WCV (pediatric measures) are
+  probably higher-value here than for an average commercial payer, not an
+  afterthought.
+- USFHP designated providers are NCQA-accredited and already report
+  HEDIS-like measures to DHA (a quality-withhold arrangement) — the pitch
+  should land as familiar, not novel.
+- Real roster/eligibility feed will likely be DEERS-linked, not a standard
+  commercial 834 — don't guess the schema, confirm with them when this is real.
+- Compliance is TRICARE + HIPAA, not just HIPAA — there may be a DoD
+  data-sharing agreement layer on top of what `docs/SECURITY_HIPAA.md`
+  currently covers. Noted as a doc TODO, nothing TRICARE-specific built yet.
 
 ## Blocker: AWS apply has not happened
 
@@ -156,6 +185,22 @@ a permissions/quota issue in the AWS account, not a bug in `infra/`.
   `ALTER`/`DROP` constraints directly (Postgres can). Batch mode is the
   portable way to write one migration that works on both; plain
   `op.drop_constraint(...)` outside batch mode will fail on SQLite specifically.
+- **SNS signature verification is real crypto, not a stub** — RSA PKCS1v15
+  over SNS's exact canonical string (field order matters, differs for
+  Notification vs. SubscriptionConfirmation), SHA1 or SHA256 depending on
+  `SignatureVersion`. The signing cert URL and the `SubscribeURL` are both
+  checked against an `sns.*.amazonaws.com` allow-list *before* any fetch —
+  an attacker-supplied URL in either field is a real SSRF vector otherwise.
+  See `backend/app/notifications/sns_verify.py`, tested in
+  `backend/tests/test_sns_verify.py` (crypto-level, synthetic cert) and
+  `backend/tests/test_webhooks.py` (full HTTP path through the FastAPI app).
+- **The SMS origination phone number is intentionally not a Terraform
+  resource.** Toll-free/10DLC numbers are manually verified through AWS
+  Support and take days; managing one as `aws_pinpointsmsvoicev2_phone_number`
+  risks Terraform trying to recreate/release a real leased number on state
+  drift. Terraform manages the SNS topic/subscription/configuration set;
+  wiring the number's two-way channel to that topic is a one-time manual
+  step (console or CLI) documented in `docs/DEPLOYMENT.md`.
 
 ## Known gaps / good next steps
 
@@ -181,6 +226,11 @@ a permissions/quota issue in the AWS account, not a bug in `infra/`.
 - Nothing has clinical/HEDIS/legal sign-off yet — see the checklists in
   `docs/HEDIS_COMPLIANCE.md` and `docs/SECURITY_HIPAA.md`, both currently
   unsigned
+- SNS signature verification has never been exercised against a real
+  AWS-signed message — only against a synthetic self-signed cert in tests.
+  Verify end-to-end once a real SNS subscription exists.
+- WAF, VPC Flow Logs, and shipping audit logs to a write-once store (S3
+  Object Lock) are still open items in `docs/SECURITY_HIPAA.md` §5/§4
 
 ## Where things are
 
@@ -189,11 +239,14 @@ backend/app/measures/        Pluggable measure modules (start here to add a new 
 backend/app/routers/dependents.py   Create/list a guardian's dependents
 backend/app/outreach_service.py   Shared outreach-send logic
 backend/app/scripts/run_outreach_cron.py   Scheduled batch job entrypoint
+backend/app/notifications/sns_verify.py   AWS SNS signature verification (inbound SMS webhook)
+backend/app/routers/webhooks.py   POST /api/webhooks/sms-inbound — STOP/START handling
 backend/migrations/           Alembic — run `alembic upgrade head` for prod schema changes
-backend/tests/                pytest suite, 59 tests, run with pytest.ini config
+backend/tests/                pytest suite, 71 tests, run with pytest.ini config
 frontend/src/components/      Shared AppNav, StepIndicator
 frontend/src/styles/theme.css Design tokens
 infra/                        Terraform — validated, not applied
+infra/modules/messaging/      SNS topic + HTTPS subscription + SMS configuration set
 docs/HEDIS_COMPLIANCE.md      Instrument licensing, thresholds, sign-off checklist
 docs/SECURITY_HIPAA.md        Encryption, audit logging, BAA checklist
 docs/DEPLOYMENT.md            Step-by-step AWS deployment runbook

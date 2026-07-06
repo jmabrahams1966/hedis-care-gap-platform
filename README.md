@@ -64,8 +64,10 @@ backend/
       diabetes.py                CDC (HbA1c subset): self-reported test/value, condition-gated
       childhood_immunization.py  CIS: self-report, dependent-scoped (guardian answers for child)
       well_child_visits.py       WCV: self-report, dependent-scoped
-    notifications/        SES email + SMS senders, templates (dev-mode safe)
-    routers/               auth, tenants, members, dependents, screenings, care_gaps, outreach, reports
+    notifications/        SES email + SMS senders, templates (dev-mode safe);
+                          sns_verify.py verifies inbound AWS SNS message signatures
+    routers/               auth, tenants, members, dependents, screenings, care_gaps,
+                          outreach, reports, webhooks (inbound SMS STOP/START)
     seed.py                Demo tenant + 7 synthetic members + 2 dependents (dev_mode only)
 frontend/
   src/
@@ -100,11 +102,16 @@ cd backend
 ./.venv/bin/pip install -r requirements-dev.txt
 ./.venv/bin/python -m pytest tests/ -v
 ```
-Unit tests for scoring (`tests/test_scoring.py`) and all seven measure modules
-(`tests/test_measures.py`) need no DB. `tests/test_api_flow.py` drives the FastAPI
-app end-to-end over `httpx.ASGITransport` against a throwaway SQLite file —
-tenant/member creation, magic-link auth, multiple measure flows, condition-gated
-eligibility, the guardian/dependent flow, exclusions, and the HEDIS report.
+Unit tests for scoring (`tests/test_scoring.py`), all seven measure modules
+(`tests/test_measures.py`), and AWS SNS signature verification
+(`tests/test_sns_verify.py`, real RSA crypto against a synthetic cert) need no
+DB. `tests/test_api_flow.py` drives the FastAPI app end-to-end over
+`httpx.ASGITransport` against a throwaway SQLite file — tenant/member creation,
+magic-link auth, multiple measure flows, condition-gated eligibility, the
+guardian/dependent flow, exclusions, and the HEDIS report.
+`tests/test_webhooks.py` does the same for the inbound SMS webhook: a signed
+STOP/START notification through the real HTTP path updates `Member.consent_sms`
+and writes an audit log entry, and unsigned/forged envelopes are rejected.
 
 **Frontend**
 ```bash

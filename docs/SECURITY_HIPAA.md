@@ -52,7 +52,11 @@ required before handling real PHI.
 
 - [x] Append-only `AuditLog` table (`backend/app/models.py`) — every login,
       magic-link request, screening submission, and care-gap status change is
-      logged with actor, action, resource, tenant, and IP (`backend/app/audit.py`)
+      logged with actor, action, resource, tenant, and IP (`backend/app/audit.py`).
+      SMS STOP/START replies are logged the same way (`action` = `sms_opt_out`/
+      `sms_opt_in`, actor_type `member`) — this is the actual TCPA/HIPAA
+      documentation trail for "member revoked consent on this date"; AWS's own
+      carrier-level opt-out list stops delivery but doesn't produce this record
 - [ ] Ship audit logs to a write-once store (e.g. S3 with Object Lock) in
       addition to the database, so an application-level compromise can't erase
       the trail
@@ -72,6 +76,15 @@ required before handling real PHI.
       `aws_wafv2_web_acl` before handling real traffic, at minimum rate-limiting
       and the AWS managed common rule set
 - [ ] VPC Flow Logs enabled for network-level audit trail
+- [x] Inbound SMS webhook (`POST /api/webhooks/sms-inbound`) verifies AWS SNS's
+      message signature (RSA PKCS1v15, SHA1/SHA256 per SNS signature version)
+      against a signing cert fetched only from an allow-listed `sns.*.amazonaws.com`
+      host — a forged/unsigned POST cannot flip a member's consent (see
+      `backend/app/notifications/sns_verify.py`). The cert-fetch and
+      subscribe-confirmation URLs are both host-checked before any network
+      call, closing off SSRF via a malicious `SigningCertURL`/`SubscribeURL`.
+      Unit- and integration-tested against a synthetic cert, not yet exercised
+      against a real AWS-signed message end-to-end.
 
 ## 6. Application-level PHI hygiene
 

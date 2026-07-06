@@ -34,10 +34,33 @@ long pole, not the infra.
    screening reminders; include the opt-in/opt-out language from
    `backend/app/notifications/templates.py`)
 3. Once approved, set `sms_origination_phone` in `terraform.tfvars`
+4. **Enable two-way SMS on the number** so inbound STOP/START replies actually
+   reach the app (`backend/app/routers/webhooks.py`,
+   `POST /api/webhooks/sms-inbound`): Terraform (`infra/modules/messaging`)
+   already creates the SNS topic and its HTTPS subscription to the webhook —
+   it auto-confirms on first `terraform apply`. What Terraform does *not* do
+   is touch the phone number resource itself (see the comment at the top of
+   `infra/modules/messaging/main.tf` for why — briefly, a real leased
+   toll-free number shouldn't be something `terraform destroy` can release).
+   After `terraform apply`, point the number's two-way channel at the
+   `sms_inbound_topic_arn` output:
+   ```bash
+   aws pinpoint-sms-voice-v2 set-two-way-channel \
+     --origination-identity <phone-number-id-or-arn> \
+     --two-way-channel-arn "$(terraform output -raw sms_inbound_topic_arn)" \
+     --two-way-enabled
+   ```
+   (or the equivalent console toggle: Phone numbers → your number → Two-way
+   SMS → enable, paste the topic ARN)
 
 Email outreach works immediately after step 1; SMS outreach is gated on this
 step. The platform degrades gracefully — members without SMS consent/number
 fall back to email (see `backend/app/routers/outreach.py::_send_to_member`).
+STOP/START keyword handling is unit- and integration-tested
+(`backend/tests/test_sns_verify.py`, `backend/tests/test_webhooks.py`) against
+a synthetic signing cert, but has never received a real signed message from
+AWS — verify it end-to-end with a real inbound text once the number is live,
+before relying on it for compliance.
 
 ## 3. Build and push the backend image
 

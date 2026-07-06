@@ -22,3 +22,8 @@ output "database_endpoint" {
   value     = module.database.cluster_endpoint
   sensitive = true
 }
+
+output "sms_inbound_topic_arn" {
+  description = "Set as the origination phone number's two-way channel ARN once it's provisioned (see docs/DEPLOYMENT.md)"
+  value       = module.messaging.sms_inbound_topic_arn
+}

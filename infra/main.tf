@@ -74,9 +74,15 @@ module "ecs" {
     SES_FROM_EMAIL           = var.ses_from_email
     SES_CONFIGURATION_SET    = "${var.project_name}"
     SMS_ORIGINATION_NUMBER   = var.sms_origination_phone
-    SMS_CONFIGURATION_SET    = "${var.project_name}-sms"
+    SMS_CONFIGURATION_SET    = module.messaging.configuration_set_name
     KMS_KEY_ARN              = module.secrets.kms_key_arn
   }
+}
+
+module "messaging" {
+  source       = "./modules/messaging"
+  project_name = var.project_name
+  api_fqdn     = "${var.api_subdomain}.${var.domain_name}"
 }
 
 module "frontend" {

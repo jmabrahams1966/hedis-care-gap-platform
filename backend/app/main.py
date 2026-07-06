@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .db import SessionLocal, init_db
-from .routers import auth, care_gaps, dependents, members, outreach, reports, screenings, tenants
+from .routers import auth, care_gaps, dependents, members, outreach, reports, screenings, tenants, webhooks
 from .seed import ensure_measure_catalog, seed_demo_tenant
 
 
@@ -36,6 +36,7 @@ app.include_router(screenings.router)
 app.include_router(care_gaps.router)
 app.include_router(outreach.router)
 app.include_router(reports.router)
+app.include_router(webhooks.router)
 
 
 @app.get("/health")
