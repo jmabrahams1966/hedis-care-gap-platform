@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .db import SessionLocal, init_db
-from .routers import auth, care_gaps, members, outreach, reports, screenings, tenants
+from .routers import auth, care_gaps, dependents, members, outreach, reports, screenings, tenants
 from .seed import ensure_measure_catalog, seed_demo_tenant
 
 
@@ -31,6 +31,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(tenants.router)
 app.include_router(members.router)
+app.include_router(dependents.router)
 app.include_router(screenings.router)
 app.include_router(care_gaps.router)
 app.include_router(outreach.router)

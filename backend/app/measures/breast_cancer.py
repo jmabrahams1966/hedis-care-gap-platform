@@ -1,8 +1,7 @@
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
-from ..models import Member
-from .base import Measure
+from .base import Demographic, Measure, age_in_years
 
 SCHEDULING_HELP_WINDOW_DAYS = 14
 
@@ -25,15 +24,11 @@ class BreastCancerScreeningMeasure(Measure):
         "with scheduling assistance offered when a member hasn't been screened."
     )
 
-    def is_eligible(self, member: Member, as_of: date) -> bool:
-        if member.sex != "F":
+    def is_eligible(self, subject: Demographic, as_of: date) -> bool:
+        if subject.sex != "F":
             return False
-        try:
-            dob = datetime.strptime(member.date_of_birth, "%Y-%m-%d").date()
-        except ValueError:
-            return False
-        age = as_of.year - dob.year - ((as_of.month, as_of.day) < (dob.month, dob.day))
-        return 50 <= age <= 74
+        age = age_in_years(subject.date_of_birth, as_of)
+        return age is not None and 50 <= age <= 74
 
     def evaluate_submission(self, payload: dict[str, Any]) -> dict[str, Any]:
         has_completed = bool(payload["has_completed"])

@@ -1,8 +1,8 @@
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
 from ..models import Member
-from .base import Measure
+from .base import Measure, age_in_years
 
 CRISIS_FOLLOW_UP_DAYS = 1
 UNCONTROLLED_FOLLOW_UP_DAYS = 14
@@ -31,12 +31,8 @@ class ControllingBloodPressureMeasure(Measure):
     def is_eligible(self, member: Member, as_of: date) -> bool:
         if "hypertension" not in member.conditions:
             return False
-        try:
-            dob = datetime.strptime(member.date_of_birth, "%Y-%m-%d").date()
-        except ValueError:
-            return False
-        age = as_of.year - dob.year - ((as_of.month, as_of.day) < (dob.month, dob.day))
-        return 18 <= age <= 85
+        age = age_in_years(member.date_of_birth, as_of)
+        return age is not None and 18 <= age <= 85
 
     def evaluate_submission(self, payload: dict[str, Any]) -> dict[str, Any]:
         systolic = int(payload["systolic"])

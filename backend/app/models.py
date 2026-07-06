@@ -7,9 +7,11 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Index,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -144,6 +146,38 @@ class Member(Base):
 
     tenant: Mapped["Tenant"] = relationship(back_populates="members")
     care_gaps: Mapped[list["CareGap"]] = relationship(back_populates="member", cascade="all, delete-orphan")
+    dependents: Mapped[list["Dependent"]] = relationship(back_populates="guardian", cascade="all, delete-orphan")
+
+
+class Dependent(Base):
+    """A minor dependent of a Member — the guardian is the account holder who
+    receives outreach (SMS/email) and authenticates via magic link; the
+    dependent is who a pediatric measure (Childhood Immunization Status,
+    Well-Child Visits) is actually about. Introduced because those measures
+    don't fit the assumption every other measure makes: that the person
+    answering the outreach is the person being screened.
+    """
+
+    __tablename__ = "dependents"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "external_dependent_id", name="uq_tenant_external_dependent"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    guardian_member_id: Mapped[str] = mapped_column(ForeignKey("members.id"), index=True)
+    external_dependent_id: Mapped[str] = mapped_column(String(128), index=True)
+
+    first_name: Mapped[str] = mapped_column(String(128))
+    last_name: Mapped[str] = mapped_column(String(128))
+    date_of_birth: Mapped[str] = mapped_column(String(10))  # YYYY-MM-DD
+    sex: Mapped[str] = mapped_column(String(1), default="U")
+
+    alias: Mapped[str] = mapped_column(String(32), default="")  # de-identified label shown to care managers
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    guardian: Mapped["Member"] = relationship(back_populates="dependents")
+    care_gaps: Mapped[list["CareGap"]] = relationship(back_populates="dependent", cascade="all, delete-orphan")
 
 
 class MagicToken(Base):
@@ -161,14 +195,43 @@ class MagicToken(Base):
 
 
 class CareGap(Base):
-    """One row per member x measure x reporting period — the unit HEDIS reports on."""
+    """One row per (member or dependent) x measure x reporting period — the
+    unit HEDIS reports on. `member_id` is always the account holder who
+    receives outreach; `dependent_id` is set when the gap's actual subject is
+    their dependent (pediatric measures) rather than the member themselves.
+
+    Two partial unique indexes (not one plain UniqueConstraint) because a
+    NULL dependent_id doesn't collide with another NULL under standard SQL
+    unique-constraint semantics — a plain UniqueConstraint here would silently
+    allow duplicate member-scoped gaps.
+    """
 
     __tablename__ = "care_gaps"
-    __table_args__ = (UniqueConstraint("member_id", "measure_code", "period", name="uq_member_measure_period"),)
+    __table_args__ = (
+        Index(
+            "uq_member_measure_period_no_dependent",
+            "member_id",
+            "measure_code",
+            "period",
+            unique=True,
+            sqlite_where=text("dependent_id IS NULL"),
+            postgresql_where=text("dependent_id IS NULL"),
+        ),
+        Index(
+            "uq_dependent_measure_period",
+            "dependent_id",
+            "measure_code",
+            "period",
+            unique=True,
+            sqlite_where=text("dependent_id IS NOT NULL"),
+            postgresql_where=text("dependent_id IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
     member_id: Mapped[str] = mapped_column(ForeignKey("members.id"), index=True)
+    dependent_id: Mapped[str | None] = mapped_column(ForeignKey("dependents.id"), nullable=True, index=True)
     measure_code: Mapped[str] = mapped_column(ForeignKey("measures.code"), index=True)
     period: Mapped[str] = mapped_column(String(16))  # e.g. "2026"
 
@@ -187,6 +250,7 @@ class CareGap(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     member: Mapped["Member"] = relationship(back_populates="care_gaps")
+    dependent: Mapped["Dependent | None"] = relationship(back_populates="care_gaps")
     outreach_attempts: Mapped[list["OutreachAttempt"]] = relationship(
         back_populates="care_gap", cascade="all, delete-orphan"
     )

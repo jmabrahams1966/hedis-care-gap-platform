@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..audit import log_action
 from ..db import get_db
 from ..deps import client_ip, require_role
-from ..models import CareGap, CaseNote, GapStatus, Member, ScreeningSubmission, StaffRole, StaffUser
+from ..models import CareGap, CaseNote, Dependent, GapStatus, Member, ScreeningSubmission, StaffRole, StaffUser
 from ..schemas import CaseNoteCreate, GapStatusUpdate
 
 router = APIRouter(prefix="/api/care-gaps", tags=["care_gaps"])
@@ -23,8 +23,9 @@ async def queue(
 ):
     """De-identified triage queue, sorted safety-first then by follow-up urgency."""
     stmt = (
-        select(CareGap, Member.alias)
+        select(CareGap, Member.alias, Dependent.alias)
         .join(Member, Member.id == CareGap.member_id)
+        .outerjoin(Dependent, Dependent.id == CareGap.dependent_id)
         .where(CareGap.tenant_id == staff.tenant_id)
     )
     if status:
@@ -47,9 +48,10 @@ async def queue(
             "safety_flag": gap.safety_flag,
             "numerator_met": gap.numerator_met,
             "follow_up_due_at": gap.follow_up_due_at,
-            "member_alias": alias,
+            "member_alias": member_alias,
+            "dependent_alias": dependent_alias,
         }
-        for gap, alias in rows
+        for gap, member_alias, dependent_alias in rows
     ]
 
 
@@ -63,6 +65,7 @@ async def case_detail(
     if gap is None or gap.tenant_id != staff.tenant_id:
         raise HTTPException(404, "Not found")
     member = await db.get(Member, gap.member_id)
+    dependent = await db.get(Dependent, gap.dependent_id) if gap.dependent_id else None
     submissions = (
         await db.execute(select(ScreeningSubmission).where(ScreeningSubmission.care_gap_id == gap.id))
     ).scalars().all()
@@ -75,6 +78,7 @@ async def case_detail(
         "safety_flag": gap.safety_flag,
         "follow_up_due_at": gap.follow_up_due_at,
         "member_alias": member.alias,
+        "dependent_alias": dependent.alias if dependent else None,
         "submissions": [
             {"submitted_at": s.submitted_at, "instrument_scores": s.instrument_scores, "safety_flag": s.safety_flag}
             for s in submissions

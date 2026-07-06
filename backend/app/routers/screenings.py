@@ -1,13 +1,14 @@
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..audit import log_action
 from ..db import get_db
 from ..deps import client_ip, get_current_member
 from ..measures import get_measure
-from ..models import CareGap, GapStatus, Member, ScreeningSubmission
+from ..models import CareGap, Dependent, GapStatus, Member, ScreeningSubmission
 from ..schemas import ScreeningSubmit
 
 router = APIRouter(prefix="/api/screenings", tags=["screenings"])
@@ -18,16 +19,28 @@ async def list_pending_screenings(
     member: Member = Depends(get_current_member),
     db: AsyncSession = Depends(get_db),
 ):
-    from sqlalchemy import select
-
+    """A guardian's pending list includes both their own care gaps and any of
+    their dependents' (pediatric measures) — dependent_first_name lets the
+    frontend personalize the question ("Has Emma had her checkup?" vs "Have
+    you...")."""
     res = await db.execute(
-        select(CareGap).where(
+        select(CareGap, Dependent)
+        .outerjoin(Dependent, Dependent.id == CareGap.dependent_id)
+        .where(
             CareGap.member_id == member.id,
             CareGap.status.in_([GapStatus.open.value, GapStatus.outreach_sent.value]),
         )
     )
-    gaps = res.scalars().all()
-    return [{"care_gap_id": g.id, "measure_code": g.measure_code, "period": g.period} for g in gaps]
+    rows = res.all()
+    return [
+        {
+            "care_gap_id": gap.id,
+            "measure_code": gap.measure_code,
+            "period": gap.period,
+            "dependent_first_name": dependent.first_name if dependent else None,
+        }
+        for gap, dependent in rows
+    ]
 
 
 @router.post("")

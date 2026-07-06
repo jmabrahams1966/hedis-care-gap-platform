@@ -162,7 +162,46 @@ Implemented in `backend/app/measures/diabetes.py`. Condition-gated like CBP
       confirm against your care team's actual outreach SLA, and consider
       whether poor control should have a shorter window than "not yet tested"
 
-## 6. Sign-off
+## 6. Measure implemented: Childhood Immunization Status (CIS)
+
+Implemented in `backend/app/measures/childhood_immunization.py`. First
+**dependent-scoped** measure (`subject_type = "dependent"`) — eligibility and
+the submitted response are about the guardian's child (a `Dependent` row), not
+the account holder (`Member`) who receives outreach and authenticates. See
+`app/models.py::Dependent` and `app/routers/dependents.py`.
+
+- [ ] Obtain the current NCQA HEDIS CIS measure specification. Real CIS
+      eligibility is children turning 2 **during the measurement year**
+      (this module simplifies to "is exactly 2 years old as of today," which
+      drifts out of sync with a proper measurement-year window — same
+      `CareGap.period`-as-calendar-year issue as BCS/COL, see below).
+- [ ] **Numerator source** — real HEDIS CIS numerator credit requires specific
+      combinations of vaccine doses ("Combo 10" and similar), verified against
+      immunization registry or claims data. This module is a **self-report
+      proxy only** ("are immunizations up to date?") — it cannot produce a
+      real CIS rate on its own. Treat it as an engagement/outreach signal, not
+      a measure calculation, until real immunization data is integrated.
+- [ ] Guardian consent: confirm your consent/privacy language covers a
+      guardian receiving outreach *about* their dependent, not just about
+      themselves — this is a different consent scope than every other measure
+      in this platform.
+
+## 7. Measure implemented: Well-Child Visits (WCV)
+
+Implemented in `backend/app/measures/well_child_visits.py`. Dependent-scoped,
+same shape as CIS.
+
+- [ ] Obtain the current NCQA HEDIS WCV measure specification. Real WCV covers
+      ages 0-21 with **different visit-count requirements by age band**
+      (e.g. 6+ visits by 15 months for infants) — this module simplifies to a
+      single "at least one well-child visit in the last 12 months" self-report
+      for ages 3-17 only. Infants/toddlers (0-2) and young adults (18-21) are
+      not covered at all; don't assume this module's denominator matches the
+      real WCV eligible population.
+- [ ] **Numerator source** — self-report, same caveat as BCS/COL/CIS: real
+      HEDIS credit is claims/encounter-based.
+
+## 8. Sign-off
 
 | Role | Name | Signature | Date |
 |---|---|---|---|
@@ -175,7 +214,7 @@ Implemented in `backend/app/measures/diabetes.py`. Condition-gated like CBP
 > protocols with a licensed clinical supervisor, your HEDIS auditor, and legal
 > counsel before any real member outreach.
 
-## 7. Reporting & submission
+## 9. Reporting & submission
 
 - [ ] Confirm `GET /api/reports/hedis` numerator/denominator logic against your
       HEDIS auditor's expectations before using it for any real submission
@@ -188,12 +227,12 @@ Implemented in `backend/app/measures/diabetes.py`. Condition-gated like CBP
       the reasons your care managers use actually match acceptable HEDIS
       exclusion categories, since right now it accepts any free-text reason
 - [ ] Fix `CareGap.period` to be measure-appropriate — calendar year works for
-      DSF/CBP/CDC (annual measures) but **not** for BCS/COL, which use
-      multi-year rolling lookback windows
+      DSF/CBP/CDC (annual measures) but **not** for BCS/COL/CIS/WCV, which use
+      multi-year or non-calendar measurement windows
 
-## 8. Adding a new measure module
+## 10. Adding a new measure module
 
-To add a measure beyond the five implemented so far:
+To add a measure beyond the seven implemented so far:
 
 1. Implement `Measure` (`backend/app/measures/base.py`): `is_eligible`,
    `evaluate_submission`, `follow_up_window_days`.
@@ -209,10 +248,12 @@ To add a measure beyond the five implemented so far:
    `Member.conditions` (see CBP/CDC) rather than inventing a new field —
    confirm the roster feed populating it is a real diagnosis source, not
    inferred from anything the member self-reports.
-6. **Pediatric measures need a different foundation.** Childhood Immunization
-   Status and Well-Child Visits were considered and deliberately deferred —
-   the person being screened (a child) is not the account holder (a
-   parent/guardian) receiving the outreach. `Member` currently models one
-   person who is both the enrollee and the one answering questions about
-   themselves. Don't bolt a child's data onto an adult `Member` row; this
-   needs a guardian/dependent relationship modeled first.
+6. **If the measure's subject is a dependent, not the account holder** (any
+   further pediatric measure), set `subject_type = "dependent"` on the module
+   and use the `Dependent` model (`app/models.py`, `app/routers/dependents.py`)
+   — built for CIS/WCV. A dependent's `CareGap` keeps `member_id` pointing at
+   the guardian (who receives outreach and authenticates) and `dependent_id`
+   pointing at who the measure is actually about; `is_eligible` is evaluated
+   against the `Dependent`, and `_open_care_gaps_for_dependent`
+   (`app/routers/members.py`) opens the gap, not `_open_care_gaps_for_member`.
+   Don't bolt a dependent's data onto an adult `Member` row.

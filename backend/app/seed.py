@@ -6,8 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .config import settings
 from .measures import REGISTRY
 from .measures.base import default_period
-from .models import Measure, Member, StaffRole, StaffUser, Tenant, TenantMeasureConfig
-from .routers.members import _alias, _open_care_gaps_for_member
+from .models import Dependent, Measure, Member, StaffRole, StaffUser, Tenant, TenantMeasureConfig
+from .routers.members import _alias, _open_care_gaps_for_dependent, _open_care_gaps_for_member
 from .security import hash_password
 
 DEMO_MEMBERS = [
@@ -20,6 +20,13 @@ DEMO_MEMBERS = [
     # BCS/COL-eligible (female, 50-74)
     ("EXT-1006", "Fatima", "Hassan", "1970-05-12", "F", ["diabetes"], "+15550001006", "fatima@example.com"),
     ("EXT-1007", "Grace", "Kim", "1955-02-20", "F", ["hypertension"], "+15550001007", "grace@example.com"),
+]
+
+# guardian_external_id, external_dependent_id, first, last, age_years, sex
+# age_years (not a fixed dob) so eligibility doesn't drift out of range as time passes
+DEMO_DEPENDENTS = [
+    ("EXT-1001", "DEP-1001", "Mia", "Nguyen", 2, "F"),  # CIS-eligible
+    ("EXT-1005", "DEP-1002", "Leo", "Petrova", 8, "M"),  # WCV-eligible
 ]
 
 
@@ -45,7 +52,15 @@ async def seed_demo_tenant(db: AsyncSession) -> None:
     db.add(tenant)
     await db.flush()
 
-    for measure_code in ("mental_health", "breast_cancer", "colorectal_cancer", "blood_pressure", "diabetes_a1c"):
+    for measure_code in (
+        "mental_health",
+        "breast_cancer",
+        "colorectal_cancer",
+        "blood_pressure",
+        "diabetes_a1c",
+        "childhood_immunization",
+        "well_child_visits",
+    ):
         db.add(TenantMeasureConfig(tenant_id=tenant.id, measure_code=measure_code, enabled=True))
 
     db.add(
@@ -77,6 +92,7 @@ async def seed_demo_tenant(db: AsyncSession) -> None:
     )
     await db.flush()
 
+    members_by_external_id: dict[str, Member] = {}
     for external_id, first, last, dob, sex, conditions, phone, email in DEMO_MEMBERS:
         member = Member(
             tenant_id=tenant.id,
@@ -97,5 +113,24 @@ async def seed_demo_tenant(db: AsyncSession) -> None:
         db.add(member)
         await db.flush()
         await _open_care_gaps_for_member(db, member)
+        members_by_external_id[external_id] = member
+
+    today = date.today()
+    for guardian_external_id, external_dependent_id, first, last, age_years, sex in DEMO_DEPENDENTS:
+        dob = f"{today.year - age_years}-{today.month:02d}-{today.day:02d}"
+        guardian = members_by_external_id[guardian_external_id]
+        dependent = Dependent(
+            tenant_id=tenant.id,
+            guardian_member_id=guardian.id,
+            external_dependent_id=external_dependent_id,
+            first_name=first,
+            last_name=last,
+            date_of_birth=dob,
+            sex=sex,
+        )
+        dependent.alias = _alias(tenant.id, external_dependent_id, prefix="Dependent")
+        db.add(dependent)
+        await db.flush()
+        await _open_care_gaps_for_dependent(db, dependent)
 
     await db.commit()

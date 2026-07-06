@@ -79,6 +79,27 @@ class MemberOut(BaseModel):
         from_attributes = True
 
 
+class DependentCreate(BaseModel):
+    external_dependent_id: str
+    first_name: str
+    last_name: str
+    date_of_birth: str  # YYYY-MM-DD
+    sex: str = "U"
+
+
+class DependentOut(BaseModel):
+    id: str
+    external_dependent_id: str
+    first_name: str
+    last_name: str
+    sex: str
+    alias: str
+    guardian_member_id: str
+
+    class Config:
+        from_attributes = True
+
+
 class MagicLinkRequest(BaseModel):
     external_member_id: str
     date_of_birth: str

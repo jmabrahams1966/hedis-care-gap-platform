@@ -2,11 +2,13 @@
 
 Multi-tenant remote patient outreach and screening for health plans — SMS/email
 check-ins that close HEDIS care gaps. Health plans elect which measure modules
-are active for their members; five are implemented so far (Depression
+are active for their members; seven are implemented so far — Depression
 Screening & Follow-Up, Breast Cancer Screening, Colorectal Cancer Screening,
-Controlling High Blood Pressure, Diabetes HbA1c Testing & Control), each
-plugging into the same tenant/member/outreach engine without touching its
-schema.
+Controlling High Blood Pressure, Diabetes HbA1c Testing & Control, Childhood
+Immunization Status, and Well-Child Visits — each plugging into the same
+tenant/outreach engine without touching its schema. The last two are
+guardian/dependent measures: the account holder receives outreach and answers
+on their child's behalf.
 
 > **Status: early scaffold.** Backend and frontend run end-to-end locally with
 > synthetic demo data. AWS infrastructure is written as Terraform but **not
@@ -49,23 +51,26 @@ outreach · ECS Fargate + Route 53 + CloudFront for hosting.
 backend/
   app/
     models.py            Tenant, Member (incl. conditions for diagnosis-gated measures),
-                          Measure, TenantMeasureConfig, CareGap, OutreachAttempt,
+                          Dependent (guardian's child, for pediatric measures), Measure,
+                          TenantMeasureConfig, CareGap, OutreachAttempt,
                           ScreeningSubmission, CaseNote, AuditLog
     scoring.py            Server-side PHQ-9 / GAD-7 scoring (client never scores)
     measures/             Pluggable measure module registry
       base.py             Measure interface every module implements
-      mental_health.py     DSF: PHQ-9 + GAD-7, age-gated
-      breast_cancer.py     BCS: self-report + scheduling-assist, age+sex-gated
-      colorectal_cancer.py COL: self-report + scheduling-assist, age-gated
-      blood_pressure.py    CBP: self-reported reading, condition-gated, crisis safety flag
-      diabetes.py          CDC (HbA1c subset): self-reported test/value, condition-gated
+      mental_health.py           DSF: PHQ-9 + GAD-7, age-gated
+      breast_cancer.py           BCS: self-report + scheduling-assist, age+sex-gated
+      colorectal_cancer.py       COL: self-report + scheduling-assist, age-gated
+      blood_pressure.py          CBP: self-reported reading, condition-gated, crisis safety flag
+      diabetes.py                CDC (HbA1c subset): self-reported test/value, condition-gated
+      childhood_immunization.py  CIS: self-report, dependent-scoped (guardian answers for child)
+      well_child_visits.py       WCV: self-report, dependent-scoped
     notifications/        SES email + SMS senders, templates (dev-mode safe)
-    routers/               auth, tenants, members, screenings, care_gaps, outreach, reports
-    seed.py                Demo tenant + 7 synthetic members (dev_mode only)
+    routers/               auth, tenants, members, dependents, screenings, care_gaps, outreach, reports
+    seed.py                Demo tenant + 7 synthetic members + 2 dependents (dev_mode only)
 frontend/
   src/
-    pages/member/          Magic-link entry, verify, PHQ-9/GAD-7 flow, safety card
-    pages/care-manager/     De-identified triage queue, case detail, notes
+    pages/member/          Magic-link entry, verify, all 7 measure flows, safety card
+    pages/care-manager/     De-identified triage queue, case detail (shows dependent alias), notes
     pages/admin/            Per-tenant measure module toggles
     pages/superadmin/       Tenant (health plan) provisioning
 infra/                     Terraform: VPC, Aurora, ECS Fargate, CloudFront, Route 53
@@ -95,11 +100,11 @@ cd backend
 ./.venv/bin/pip install -r requirements-dev.txt
 ./.venv/bin/python -m pytest tests/ -v
 ```
-Unit tests for scoring (`tests/test_scoring.py`) and all five measure modules
+Unit tests for scoring (`tests/test_scoring.py`) and all seven measure modules
 (`tests/test_measures.py`) need no DB. `tests/test_api_flow.py` drives the FastAPI
 app end-to-end over `httpx.ASGITransport` against a throwaway SQLite file —
 tenant/member creation, magic-link auth, multiple measure flows, condition-gated
-eligibility, exclusions, and the HEDIS report.
+eligibility, the guardian/dependent flow, exclusions, and the HEDIS report.
 
 **Frontend**
 ```bash
@@ -111,7 +116,7 @@ npm run dev   # http://localhost:5173, expects the backend on :8099
 ## How a measure module works
 
 A "measure" (`backend/app/measures/base.py`) is eligibility rules + submission
-evaluation + a follow-up window. Three distinct shapes exist so far:
+evaluation + a follow-up window. Four distinct shapes exist so far:
 
 - **Structured instrument** (`mental_health.py` — DSF): members 12+ are
   eligible, completing PHQ-9 (+GAD-7) satisfies the numerator, and a
@@ -123,13 +128,17 @@ evaluation + a follow-up window. Three distinct shapes exist so far:
   `diabetes.py` — CBP/CDC): eligibility requires a diagnosis on file
   (`Member.conditions`), not just age/sex, and the reading itself can trigger a
   safety flag (BP crisis range) independent of numerator status.
+- **Dependent-scoped self-report** (`childhood_immunization.py`,
+  `well_child_visits.py` — CIS/WCV): eligibility and the submitted response are
+  about the account holder's child (a `Dependent` row,
+  `subject_type = "dependent"`), not the account holder themselves. The
+  guardian still receives outreach and authenticates; the resulting `CareGap`
+  keeps `member_id` = guardian and `dependent_id` = the actual subject. See
+  `app/models.py::Dependent` and `app/routers/dependents.py`.
 
 A tenant elects which measures are active (`TenantMeasureConfig`); adding
 another one means writing one more module and registering it in
 `measures/__init__.py` — no changes to tenant, member, or outreach code.
-Pediatric measures (Childhood Immunization Status, Well-Child Visits) are a
-fourth shape not yet built — see `docs/HEDIS_COMPLIANCE.md` §8 for why they
-need a guardian/dependent relationship first.
 
 ## Before production
 

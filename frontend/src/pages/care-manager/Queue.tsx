@@ -13,6 +13,7 @@ interface GapRow {
   numerator_met: boolean;
   follow_up_due_at: string | null;
   member_alias: string;
+  dependent_alias: string | null;
 }
 
 const FILTERS = [
@@ -100,7 +101,14 @@ export default function Queue() {
             <tbody>
               {filtered.map((g) => (
                 <tr key={g.id}>
-                  <td>{g.member_alias}</td>
+                  <td>
+                    {g.dependent_alias ?? g.member_alias}
+                    {g.dependent_alias && (
+                      <span className="muted" style={{ fontSize: 12, display: "block" }}>
+                        dependent of {g.member_alias}
+                      </span>
+                    )}
+                  </td>
                   <td>{MEASURE_LABELS[g.measure_code] ?? g.measure_code}</td>
                   <td>{statusBadge(g)}</td>
                   <td style={{ textAlign: "right" }}>

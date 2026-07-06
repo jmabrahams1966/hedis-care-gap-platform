@@ -8,6 +8,7 @@ interface PendingGap {
   care_gap_id: string;
   measure_code: string;
   period: string;
+  dependent_first_name: string | null;
 }
 
 interface SubmitResult {
@@ -105,6 +106,34 @@ export default function ScreeningFlow() {
       return <BloodPressureFlow onSubmit={submit} onOutcome={setOutcome} />;
     case "diabetes_a1c":
       return <DiabetesA1cFlow onSubmit={submit} onOutcome={setOutcome} />;
+    case "childhood_immunization": {
+      const childName = gap.dependent_first_name ?? "your child";
+      return (
+        <YesNoScheduleFlow
+          onSubmit={submit}
+          onOutcome={setOutcome}
+          question={`Are ${childName}'s recommended immunizations up to date for their 2-year checkup?`}
+          responseKey="has_completed"
+          yesLabel="Yes, up to date"
+          noLabel="No, not yet"
+          doneBody={() => <>Thanks for checking in about {childName}!</>}
+        />
+      );
+    }
+    case "well_child_visits": {
+      const childName = gap.dependent_first_name ?? "your child";
+      return (
+        <YesNoScheduleFlow
+          onSubmit={submit}
+          onOutcome={setOutcome}
+          question={`Has ${childName} had their annual well-child visit (checkup) with their doctor?`}
+          responseKey="has_completed"
+          yesLabel="Yes, they have"
+          noLabel="No, not yet"
+          doneBody={() => <>Thanks for checking in about {childName}!</>}
+        />
+      );
+    }
     default:
       return <MentalHealthFlow onSubmit={submit} onOutcome={setOutcome} />;
   }
@@ -210,12 +239,16 @@ function YesNoScheduleFlow({
   question,
   responseKey,
   doneBody,
+  yesLabel = "Yes, I've had one",
+  noLabel = "No, not yet",
 }: {
   onSubmit: OnSubmit;
   onOutcome: OnOutcome;
   question: string;
   responseKey: string;
   doneBody: (firstName?: string) => React.ReactNode;
+  yesLabel?: string;
+  noLabel?: string;
 }) {
   const { member } = useSession();
   const [hasCompleted, setHasCompleted] = useState<boolean | null>(null);
@@ -259,7 +292,7 @@ function YesNoScheduleFlow({
               setWantsHelp(null);
             }}
           />
-          Yes, I've had one
+          {yesLabel}
         </label>
         <label className="choice" style={{ marginBottom: 0 }}>
           <input
@@ -268,7 +301,7 @@ function YesNoScheduleFlow({
             checked={hasCompleted === false}
             onChange={() => setHasCompleted(false)}
           />
-          No, not yet
+          {noLabel}
         </label>
       </div>
 

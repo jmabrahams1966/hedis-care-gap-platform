@@ -1,9 +1,8 @@
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
-from ..models import Member
 from ..scoring import score_gad7, score_phq9
-from .base import Measure
+from .base import Demographic, Measure, age_in_years
 
 MODERATE_OR_ABOVE = {"moderate", "moderately_severe", "severe"}
 
@@ -24,13 +23,9 @@ class MentalHealthMeasure(Measure):
         "documented follow-up for positive/moderate-or-higher results."
     )
 
-    def is_eligible(self, member: Member, as_of: date) -> bool:
-        try:
-            dob = datetime.strptime(member.date_of_birth, "%Y-%m-%d").date()
-        except ValueError:
-            return False
-        age = as_of.year - dob.year - ((as_of.month, as_of.day) < (dob.month, dob.day))
-        return age >= 12  # DSF covers adolescents (12+) and adults
+    def is_eligible(self, subject: Demographic, as_of: date) -> bool:
+        age = age_in_years(subject.date_of_birth, as_of)
+        return age is not None and age >= 12  # DSF covers adolescents (12+) and adults
 
     def evaluate_submission(self, payload: dict[str, Any]) -> dict[str, Any]:
         phq9 = score_phq9(payload["phq9"])

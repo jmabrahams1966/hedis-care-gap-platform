@@ -10,7 +10,7 @@ Multi-tenant remote patient outreach platform for health plans (payers) — SMS/
 email check-ins that close HEDIS care gaps. Built around a pluggable measure
 architecture: a tenant elects which HEDIS measure modules are active
 (`backend/app/measures/`), each with its own eligibility rules, outreach
-templates, and gap tracking. Five modules exist so far, covering three
+templates, and gap tracking. Seven modules exist so far, covering four
 structurally different shapes:
 
 - **Mental health** (Depression Screening & Follow-Up / DSF) — PHQ-9 + GAD-7
@@ -21,25 +21,32 @@ structurally different shapes:
 - **Controlling High Blood Pressure** (CBP) and **Diabetes HbA1c Testing &
   Control** (CDC subset) — self-reported clinical reading. **Condition-gated**:
   eligibility requires a diagnosis on `Member.conditions`
-  (e.g. `["hypertension"]`), not just age/sex — the first measures where that
-  distinction mattered. CBP also introduces a non-mental-health safety flag
-  (hypertensive crisis, systolic >=180 or diastolic >=120).
+  (e.g. `["hypertension"]`), not just age/sex. CBP also introduces a
+  non-mental-health safety flag (hypertensive crisis, systolic >=180 or
+  diastolic >=120).
+- **Childhood Immunization Status** (CIS) and **Well-Child Visits** (WCV) —
+  **dependent-scoped**: the measure's subject is the account holder's child
+  (a `Dependent` row), not the account holder themselves. The guardian
+  (`Member`) still receives outreach and authenticates; `CareGap.member_id`
+  stays the guardian while `CareGap.dependent_id` is the actual subject.
+  `Measure.subject_type = "dependent"` is what distinguishes these from
+  everything else — see `app/models.py::Dependent`,
+  `app/routers/dependents.py`, and `app/routers/members.py::
+  _open_care_gaps_for_dependent`.
 
-**Deliberately not built yet**: Childhood Immunization Status and Well-Child
-Visits. Both are pediatric — the person being screened is a child, not the
-account holder answering the outreach. `Member` currently conflates "the
-enrollee" and "the person answering questions about themselves," which works
-for all five adult measures above but doesn't fit a guardian/dependent
-relationship. Don't bolt child data onto an adult `Member` row if you pick
-this up — model the relationship properly first. See
-`docs/HEDIS_COMPLIANCE.md` §8 for more detail.
+This required a real architectural fork (not just another module): `Member`
+used to conflate "the enrollee" and "the person answering questions about
+themselves," which doesn't fit a child being screened while a parent answers
+on their behalf. If you're adding a measure and its subject is ever someone
+other than the account holder, follow the `Dependent` pattern — don't bolt
+their data onto an adult `Member` row.
 
 ## Current status
 
 - **Backend**: FastAPI + async SQLAlchemy. Fully working locally (SQLite,
-  dev_mode). 45 passing tests (`backend/tests/`). Alembic wired up
-  (`backend/migrations/`) with two migrations generated (initial schema, then
-  the `Member.conditions` column).
+  dev_mode). 59 passing tests (`backend/tests/`). Alembic wired up
+  (`backend/migrations/`) with three migrations generated (initial schema,
+  `Member.conditions`, then the `Dependent` table + `CareGap.dependent_id`).
 - **Frontend**: React + TS + Vite. Redesigned UI (design system, shared nav,
   step indicators) as of the last commit. Verified in-browser across every
   page/role at desktop + mobile widths.
@@ -134,20 +141,41 @@ a permissions/quota issue in the AWS account, not a bug in `infra/`.
 - **CDC here is the HbA1c sub-measure only** — the full HEDIS Comprehensive
   Diabetes Care bundle also includes eye exam and nephropathy monitoring,
   neither implemented.
+- **`Dependent` model + `CareGap.dependent_id`** (nullable FK) built for
+  CIS/WCV. `CareGap`'s uniqueness is enforced via **two partial unique
+  indexes** (`uq_member_measure_period_no_dependent` WHERE dependent_id IS
+  NULL, `uq_dependent_measure_period` WHERE dependent_id IS NOT NULL), not one
+  plain `UniqueConstraint` — a single constraint would silently allow
+  duplicate member-scoped gaps, since standard SQL treats every NULL as
+  distinct from every other NULL in a unique constraint. This let two
+  dependents of the same guardian each get their own gap for the same
+  measure+period, verified directly against the schema in a raw-SQL test
+  before trusting the app-level "check existing before insert" logic alone.
+- **SQLite migration gotcha**: the migration adding `dependent_id` needed
+  `op.batch_alter_table(...)` for the `care_gaps` ALTER — SQLite can't
+  `ALTER`/`DROP` constraints directly (Postgres can). Batch mode is the
+  portable way to write one migration that works on both; plain
+  `op.drop_constraint(...)` outside batch mode will fail on SQLite specifically.
 
 ## Known gaps / good next steps
 
-- Pediatric measures (Childhood Immunization Status, Well-Child Visits) need
-  a guardian/dependent relationship modeled first — see above
 - MFA for staff logins (password + JWT only today)
 - WAF in front of the ALB/CloudFront (not yet in Terraform)
 - Field-level encryption for member PII beyond whole-disk/at-rest
-- Fix `CareGap.period` for BCS/COL's actual lookback windows (multi-year, not
-  calendar-year — and COL's varies by screening modality)
-- Claims-based (not self-report) numerator confirmation for BCS, COL, CBP, CDC
+- Fix `CareGap.period` for BCS/COL/CIS/WCV's actual lookback windows
+  (multi-year or non-calendar, not calendar-year — and COL's varies by
+  screening modality)
+- Claims-based (not self-report) numerator confirmation for BCS, COL, CBP,
+  CDC, CIS, WCV — every measure's numerator is currently self-report or a
+  self-reported clinical value, none are claims/encounter-confirmed
+- CIS/WCV are self-report proxies only — real numerator credit needs
+  immunization-registry or claims data neither module has access to
+- WCV only covers ages 3-17 of HEDIS's real 0-21 eligible population (no
+  infant/toddler visit-count logic, no young-adult band)
 - Real roster ingestion from an actual payer eligibility feed format (834,
   or whatever the first real payer sends) — currently JSON bulk + CSV upload
-  (CSV now includes a `conditions` column, pipe-separated)
+  (CSV now includes a `conditions` column, pipe-separated). Dependents have no
+  bulk/CSV ingestion yet, only single-create via API.
 - Nothing has clinical/HEDIS/legal sign-off yet — see the checklists in
   `docs/HEDIS_COMPLIANCE.md` and `docs/SECURITY_HIPAA.md`, both currently
   unsigned
@@ -156,10 +184,11 @@ a permissions/quota issue in the AWS account, not a bug in `infra/`.
 
 ```
 backend/app/measures/        Pluggable measure modules (start here to add a new one)
+backend/app/routers/dependents.py   Create/list a guardian's dependents
 backend/app/outreach_service.py   Shared outreach-send logic
 backend/app/scripts/run_outreach_cron.py   Scheduled batch job entrypoint
 backend/migrations/           Alembic — run `alembic upgrade head` for prod schema changes
-backend/tests/                pytest suite, 45 tests, run with pytest.ini config
+backend/tests/                pytest suite, 59 tests, run with pytest.ini config
 frontend/src/components/      Shared AppNav, StepIndicator
 frontend/src/styles/theme.css Design tokens
 infra/                        Terraform — validated, not applied

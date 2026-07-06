@@ -11,39 +11,48 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_db
 from ..deps import require_role
 from ..measures import REGISTRY
-from ..models import CareGap, Member, StaffRole, StaffUser, TenantMeasureConfig
+from ..models import CareGap, Dependent, Member, StaffRole, StaffUser, TenantMeasureConfig
 from ..measures.base import default_period
 from ..schemas import MemberCreate, MemberOut
 
 router = APIRouter(prefix="/api/members", tags=["members"])
 
 
-def _alias(tenant_id: str, external_member_id: str) -> str:
-    digest = hashlib.sha256(f"{tenant_id}:{external_member_id}".encode()).hexdigest()[:6].upper()
-    return f"Member-{digest}"
+def _alias(tenant_id: str, external_id: str, *, prefix: str = "Member") -> str:
+    digest = hashlib.sha256(f"{tenant_id}:{external_id}".encode()).hexdigest()[:6].upper()
+    return f"{prefix}-{digest}"
 
 
-async def _open_care_gaps_for_member(db: AsyncSession, member: Member) -> None:
-    """Evaluate every measure enabled for the member's tenant and open a CareGap
-    row for the current period if the member is eligible and doesn't have one yet."""
-    configs = (
+async def _enabled_measure_configs(db: AsyncSession, tenant_id: str) -> list[TenantMeasureConfig]:
+    return (
         await db.execute(
             select(TenantMeasureConfig).where(
-                TenantMeasureConfig.tenant_id == member.tenant_id,
+                TenantMeasureConfig.tenant_id == tenant_id,
                 TenantMeasureConfig.enabled.is_(True),
             )
         )
     ).scalars().all()
 
+
+async def _open_care_gaps_for_member(db: AsyncSession, member: Member) -> None:
+    """Evaluate every member-scoped measure enabled for the member's tenant and
+    open a CareGap row for the current period if the member is eligible and
+    doesn't have one yet. Dependent-scoped measures (pediatric) are handled by
+    _open_care_gaps_for_dependent instead — a member is never their own
+    dependent-measure subject."""
+    configs = await _enabled_measure_configs(db, member.tenant_id)
     period = default_period()
     for config in configs:
         measure = REGISTRY.get(config.measure_code)
-        if measure is None or not measure.is_eligible(member, date.today()):
+        if measure is None or measure.subject_type != "member":
+            continue
+        if not measure.is_eligible(member, date.today()):
             continue
         existing = (
             await db.execute(
                 select(CareGap).where(
                     CareGap.member_id == member.id,
+                    CareGap.dependent_id.is_(None),
                     CareGap.measure_code == config.measure_code,
                     CareGap.period == period,
                 )
@@ -54,6 +63,40 @@ async def _open_care_gaps_for_member(db: AsyncSession, member: Member) -> None:
                 CareGap(
                     tenant_id=member.tenant_id,
                     member_id=member.id,
+                    measure_code=config.measure_code,
+                    period=period,
+                )
+            )
+
+
+async def _open_care_gaps_for_dependent(db: AsyncSession, dependent: Dependent) -> None:
+    """Same as _open_care_gaps_for_member, but for dependent-scoped (pediatric)
+    measures. The resulting CareGap keeps member_id = the guardian (who
+    receives outreach and submits on the dependent's behalf) alongside
+    dependent_id = the actual subject of the measure."""
+    configs = await _enabled_measure_configs(db, dependent.tenant_id)
+    period = default_period()
+    for config in configs:
+        measure = REGISTRY.get(config.measure_code)
+        if measure is None or measure.subject_type != "dependent":
+            continue
+        if not measure.is_eligible(dependent, date.today()):
+            continue
+        existing = (
+            await db.execute(
+                select(CareGap).where(
+                    CareGap.dependent_id == dependent.id,
+                    CareGap.measure_code == config.measure_code,
+                    CareGap.period == period,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            db.add(
+                CareGap(
+                    tenant_id=dependent.tenant_id,
+                    member_id=dependent.guardian_member_id,
+                    dependent_id=dependent.id,
                     measure_code=config.measure_code,
                     period=period,
                 )

@@ -271,3 +271,95 @@ async def test_condition_gated_measures_only_open_for_members_with_the_condition
     # exactly one blood_pressure gap total — the member without the condition never got one
     assert sum(1 for g in gaps if g["measure_code"] == "blood_pressure") == 1
     assert sum(1 for g in gaps if g["measure_code"] == "diabetes_a1c") == 0
+
+
+@pytest.mark.asyncio
+async def test_guardian_dependent_flow(client: AsyncClient):
+    """Pediatric measures (CIS/WCV) are the first ones where the account
+    holder answering outreach isn't the person the measure is about — this
+    exercises that whole path: guardian authenticates, sees a gap that's
+    actually about their dependent, and submits on the dependent's behalf."""
+    sa_email, sa_password = await _make_super_admin()
+    sa_token = await _login(client, sa_email, sa_password)
+
+    slug = f"guardiantest-{uuid.uuid4().hex[:8]}"
+    admin_email = f"admin-{uuid.uuid4().hex[:8]}@example.com"
+    res = await client.post(
+        "/api/tenants",
+        json={
+            "slug": slug,
+            "name": "Guardian Test Plan",
+            "enabled_measures": ["childhood_immunization"],
+            "first_admin_email": admin_email,
+            "first_admin_password": "admin-password-123",
+        },
+        headers=_auth(sa_token),
+    )
+    assert res.status_code == 200, res.text
+    pa_token = await _login(client, admin_email, "admin-password-123")
+
+    this_year = date.today().year
+    res = await client.post(
+        "/api/members",
+        json={
+            "external_member_id": "GUARD-1",
+            "first_name": "Guardian",
+            "last_name": "Test",
+            "date_of_birth": f"{this_year - 35}-01-01",
+            "sex": "F",
+            "phone": "+15559990000",
+            "consent_sms": True,
+        },
+        headers=_auth(pa_token),
+    )
+    assert res.status_code == 200, res.text
+    guardian_id = res.json()["id"]
+    guardian_dob = f"{this_year - 35}-01-01"
+
+    # dependent turning 2 this year -> eligible for CIS
+    res = await client.post(
+        f"/api/members/{guardian_id}/dependents",
+        json={
+            "external_dependent_id": "KID-1",
+            "first_name": "Kiddo",
+            "last_name": "Test",
+            "date_of_birth": f"{this_year - 2}-06-01",
+            "sex": "M",
+        },
+        headers=_auth(pa_token),
+    )
+    assert res.status_code == 200, res.text
+    dependent_alias = res.json()["alias"]
+    assert dependent_alias.startswith("Dependent-")
+
+    # guardian authenticates with their own identity, not the child's
+    res = await client.post(
+        "/api/auth/member/magic", json={"external_member_id": "GUARD-1", "date_of_birth": guardian_dob}
+    )
+    dev_token = res.json()["dev_token"]
+    res = await client.post("/api/auth/member/verify", json={"token": dev_token})
+    guardian_token = res.json()["token"]
+
+    # pending screening is personalized with the dependent's name, not the guardian's
+    res = await client.get("/api/screenings/pending", headers=_auth(guardian_token))
+    pending = res.json()
+    assert len(pending) == 1
+    assert pending[0]["measure_code"] == "childhood_immunization"
+    assert pending[0]["dependent_first_name"] == "Kiddo"
+    cis_gap_id = pending[0]["care_gap_id"]
+
+    # guardian submits on the dependent's behalf
+    res = await client.post(
+        "/api/screenings",
+        json={"care_gap_id": cis_gap_id, "responses": {"has_completed": True}},
+        headers=_auth(guardian_token),
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["status"] == "completed"
+
+    # care manager view shows the dependent's alias, distinct from the guardian's
+    res = await client.get(f"/api/care-gaps/{cis_gap_id}", headers=_auth(pa_token))
+    detail = res.json()
+    assert detail["dependent_alias"] == dependent_alias
+    assert detail["member_alias"] != dependent_alias
+    assert detail["submissions"][0]["instrument_scores"]["cis"]["has_completed"] is True

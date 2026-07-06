@@ -4,10 +4,12 @@ import pytest
 
 from app.measures.blood_pressure import blood_pressure_measure
 from app.measures.breast_cancer import breast_cancer_measure
+from app.measures.childhood_immunization import childhood_immunization_measure
 from app.measures.colorectal_cancer import colorectal_cancer_measure
 from app.measures.diabetes import diabetes_a1c_measure
 from app.measures.mental_health import mental_health_measure
-from app.models import Member
+from app.measures.well_child_visits import well_child_visits_measure
+from app.models import Dependent, Member
 
 TODAY = date(2026, 7, 5)
 
@@ -21,6 +23,18 @@ def make_member(dob: str, sex: str = "U", conditions: list[str] | None = None) -
         date_of_birth=dob,
         sex=sex,
         conditions=conditions or [],
+    )
+
+
+def make_dependent(dob: str, sex: str = "U") -> Dependent:
+    return Dependent(
+        tenant_id="t1",
+        guardian_member_id="m1",
+        external_dependent_id="ext-dep",
+        first_name="Kid",
+        last_name="Test",
+        date_of_birth=dob,
+        sex=sex,
     )
 
 
@@ -231,3 +245,58 @@ def test_a1c_missing_value_treated_as_untested_control_unknown():
     evaluation = diabetes_a1c_measure.evaluate_submission({"has_recent_test": True, "a1c_value": None})
     assert evaluation["numerator_met"] is True
     assert evaluation["needs_follow_up"] is False  # can't flag poor control without a value
+
+
+# --- Childhood Immunization Status (CIS) — first dependent-scoped measure ---
+
+
+def test_cis_is_dependent_scoped():
+    assert childhood_immunization_measure.subject_type == "dependent"
+
+
+@pytest.mark.parametrize("age,expected", [(1, False), (2, True), (3, False)])
+def test_cis_eligible_only_at_age_2(age, expected):
+    dob = f"{TODAY.year - age}-{TODAY.month:02d}-{TODAY.day:02d}"
+    assert childhood_immunization_measure.is_eligible(make_dependent(dob), TODAY) is expected
+
+
+def test_cis_completed_meets_numerator():
+    evaluation = childhood_immunization_measure.evaluate_submission({"has_completed": True})
+    assert evaluation["numerator_met"] is True
+    assert evaluation["needs_follow_up"] is False
+
+
+def test_cis_not_completed_wants_help_opens_14_day_follow_up():
+    evaluation = childhood_immunization_measure.evaluate_submission(
+        {"has_completed": False, "wants_scheduling_help": True}
+    )
+    assert evaluation["needs_follow_up"] is True
+    assert childhood_immunization_measure.follow_up_window_days(evaluation) == 14
+
+
+# --- Well-Child Visits (WCV) ---
+
+
+def test_wcv_is_dependent_scoped():
+    assert well_child_visits_measure.subject_type == "dependent"
+
+
+@pytest.mark.parametrize("age,expected", [(2, False), (3, True), (17, True), (18, False)])
+def test_wcv_age_band(age, expected):
+    dob = f"{TODAY.year - age}-{TODAY.month:02d}-{TODAY.day:02d}"
+    assert well_child_visits_measure.is_eligible(make_dependent(dob), TODAY) is expected
+
+
+def test_wcv_completed_meets_numerator():
+    evaluation = well_child_visits_measure.evaluate_submission({"has_completed": True})
+    assert evaluation["numerator_met"] is True
+    assert evaluation["needs_follow_up"] is False
+
+
+def test_wcv_not_completed_declines_help_stays_open():
+    evaluation = well_child_visits_measure.evaluate_submission(
+        {"has_completed": False, "wants_scheduling_help": False}
+    )
+    assert evaluation["numerator_met"] is False
+    assert evaluation["needs_follow_up"] is False
+    assert well_child_visits_measure.follow_up_window_days(evaluation) is None

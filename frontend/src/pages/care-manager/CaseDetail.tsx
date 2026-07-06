@@ -40,6 +40,8 @@ interface Submission {
     col?: ScheduleAssistScore;
     bp?: BpScore;
     a1c?: A1cScore;
+    cis?: ScheduleAssistScore;
+    wcv?: ScheduleAssistScore;
   };
 }
 
@@ -57,6 +59,7 @@ interface CaseDetailResponse {
   safety_flag: boolean;
   follow_up_due_at: string | null;
   member_alias: string;
+  dependent_alias: string | null;
   submissions: Submission[];
   notes: Note[];
 }
@@ -138,7 +141,8 @@ export default function CaseDetail() {
       </Link>
 
       <div className="page-header" style={{ marginTop: 8 }}>
-        <h1>{data.member_alias}</h1>
+        <h1>{data.dependent_alias ?? data.member_alias}</h1>
+        {data.dependent_alias && <p className="muted">dependent of {data.member_alias} (guardian)</p>}
         <div className="stack" style={{ alignItems: "center" }}>
           <span className="muted">{MEASURE_LABELS[data.measure_code] ?? data.measure_code}</span>
           {statusBadge(data.status)}
@@ -219,6 +223,20 @@ export default function CaseDetail() {
                 {s.instrument_scores.a1c.has_recent_test
                   ? `HbA1c: ${s.instrument_scores.a1c.value ?? "unknown"}%${s.instrument_scores.a1c.poor_control ? " — poor control" : ""}`
                   : "HbA1c: no recent test"}
+              </span>
+            )}
+            {s.instrument_scores.cis && (
+              <span className={`badge ${s.instrument_scores.cis.has_completed ? "done" : "follow-up"}`}>
+                Immunizations: {s.instrument_scores.cis.has_completed ? "up to date" : "not up to date"}
+                {!s.instrument_scores.cis.has_completed &&
+                  (s.instrument_scores.cis.wants_scheduling_help ? " — wants help" : " — declined help")}
+              </span>
+            )}
+            {s.instrument_scores.wcv && (
+              <span className={`badge ${s.instrument_scores.wcv.has_completed ? "done" : "follow-up"}`}>
+                Well-child visit: {s.instrument_scores.wcv.has_completed ? "completed" : "not completed"}
+                {!s.instrument_scores.wcv.has_completed &&
+                  (s.instrument_scores.wcv.wants_scheduling_help ? " — wants help" : " — declined help")}
               </span>
             )}
           </div>
