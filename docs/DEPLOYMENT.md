@@ -85,7 +85,10 @@ Then use `POST /api/tenants` (as that super_admin) to create the first real
 health plan tenant, and either `POST /api/members/bulk` (JSON array) or
 `POST /api/members/bulk-csv` (multipart file upload, columns documented in
 `backend/app/routers/members.py` and `backend/sample_roster.csv`) to load its
-member roster from the payer's eligibility feed.
+member roster from the payer's eligibility feed. The CSV endpoint accepts
+dependent rows in the same file as their guardian (via a
+`guardian_external_member_id` column), so a family can be onboarded in one
+upload rather than a separate call per dependent.
 
 ## 6. Deploy the frontend
 

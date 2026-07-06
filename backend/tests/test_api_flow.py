@@ -363,3 +363,56 @@ async def test_guardian_dependent_flow(client: AsyncClient):
     assert detail["dependent_alias"] == dependent_alias
     assert detail["member_alias"] != dependent_alias
     assert detail["submissions"][0]["instrument_scores"]["cis"]["has_completed"] is True
+
+
+@pytest.mark.asyncio
+async def test_bulk_csv_ingests_members_and_dependents_together(client: AsyncClient):
+    """One roster file should be able to carry a whole family — a subscriber
+    row and their dependent's row together — matching how a real payer feed
+    is structured, rather than requiring one API call per dependent."""
+    sa_email, sa_password = await _make_super_admin()
+    sa_token = await _login(client, sa_email, sa_password)
+
+    slug = f"csvtest-{uuid.uuid4().hex[:8]}"
+    admin_email = f"admin-{uuid.uuid4().hex[:8]}@example.com"
+    res = await client.post(
+        "/api/tenants",
+        json={
+            "slug": slug,
+            "name": "CSV Test Plan",
+            "enabled_measures": ["mental_health"],
+            "first_admin_email": admin_email,
+            "first_admin_password": "admin-password-123",
+        },
+        headers=_auth(sa_token),
+    )
+    assert res.status_code == 200, res.text
+    pa_token = await _login(client, admin_email, "admin-password-123")
+
+    csv_content = (
+        "external_member_id,external_dependent_id,guardian_external_member_id,"
+        "first_name,last_name,date_of_birth,sex\n"
+        "CSV-GUARD-1,,,\"Parent\",\"One\",1985-01-01,F\n"
+        ",CSV-DEP-1,CSV-GUARD-1,\"Kid\",\"One\",2023-01-01,M\n"
+        ",CSV-DEP-2,CSV-GUARD-NONEXISTENT,\"Ghost\",\"Kid\",2023-01-01,M\n"
+    )
+
+    res = await client.post(
+        "/api/members/bulk-csv",
+        files={"file": ("roster.csv", csv_content, "text/csv")},
+        headers=_auth(pa_token),
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["members_created"] == 1
+    assert body["dependents_created"] == 1
+    assert len(body["errors"]) == 1
+    assert body["errors"][0]["type"] == "dependent"
+    assert body["errors"][0]["external_id"] == "CSV-DEP-2"
+
+    guardian_id = body["members"][0]["id"]
+    res = await client.get(f"/api/members/{guardian_id}/dependents", headers=_auth(pa_token))
+    dependents = res.json()
+    assert len(dependents) == 1
+    assert dependents[0]["external_dependent_id"] == "CSV-DEP-1"
+    assert dependents[0]["guardian_member_id"] == guardian_id

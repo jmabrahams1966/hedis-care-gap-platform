@@ -13,7 +13,7 @@ from ..deps import require_role
 from ..measures import REGISTRY
 from ..models import CareGap, Dependent, Member, StaffRole, StaffUser, TenantMeasureConfig
 from ..measures.base import default_period
-from ..schemas import MemberCreate, MemberOut
+from ..schemas import DependentCreate, DependentOut, MemberCreate, MemberOut
 
 router = APIRouter(prefix="/api/members", tags=["members"])
 
@@ -126,6 +126,23 @@ async def _create_member(db: AsyncSession, tenant_id: str, item: MemberCreate) -
     return member
 
 
+async def _create_dependent(db: AsyncSession, guardian: Member, item: DependentCreate) -> Dependent:
+    dependent = Dependent(
+        tenant_id=guardian.tenant_id,
+        guardian_member_id=guardian.id,
+        external_dependent_id=item.external_dependent_id,
+        first_name=item.first_name,
+        last_name=item.last_name,
+        date_of_birth=item.date_of_birth,
+        sex=item.sex,
+    )
+    dependent.alias = _alias(guardian.tenant_id, item.external_dependent_id, prefix="Dependent")
+    db.add(dependent)
+    await db.flush()
+    await _open_care_gaps_for_dependent(db, dependent)
+    return dependent
+
+
 @router.post("", response_model=MemberOut)
 async def create_member(
     body: MemberCreate,
@@ -164,45 +181,104 @@ async def bulk_create_members_csv(
     staff: StaffUser = Depends(require_role(StaffRole.payer_admin.value, StaffRole.super_admin.value)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Roster ingestion from a CSV eligibility feed. Expected columns:
-    external_member_id, first_name, last_name, date_of_birth (YYYY-MM-DD), sex (F/M/U),
+    """Roster ingestion from a CSV eligibility feed — one file can carry a whole
+    family: subscriber rows and their dependents together, matching how a real
+    payer eligibility feed is usually structured. Expected columns:
+
+    external_member_id, external_dependent_id, guardian_external_member_id,
+    first_name, last_name, date_of_birth (YYYY-MM-DD), sex (F/M/U),
     conditions (pipe-separated, e.g. "hypertension|diabetes"), phone, email,
     preferred_channel (sms/email), preferred_language, consent_sms, consent_email
-    (consent columns accept 1/true/yes as truthy). Unknown/missing optional columns fall back
-    to MemberCreate's defaults.
+    (consent columns accept 1/true/yes as truthy).
+
+    A row is a **dependent** row if `guardian_external_member_id` is set — in
+    that case `external_dependent_id`/`first_name`/`last_name`/`date_of_birth`/
+    `sex` are used (conditions/phone/email/consent/etc. don't apply to
+    dependents and are ignored) and the guardian is looked up by
+    `guardian_external_member_id`, either from a member row earlier in this
+    same file or from a member already on file from a previous upload.
+    Otherwise it's a regular **member** row, same as before. Dependent rows
+    are processed after all member rows, so ordering within the file doesn't
+    matter — the guardian doesn't need to appear before their dependents.
     """
     raw = (await file.read()).decode("utf-8-sig")
-    reader = csv.DictReader(io.StringIO(raw))
+    rows = [{k: (v or "").strip() for k, v in row.items()} for row in csv.DictReader(io.StringIO(raw))]
 
-    created: list[Member] = []
+    member_rows = []
+    dependent_rows = []
+    for row_num, row in enumerate(rows, start=2):  # header is row 1
+        (dependent_rows if row.get("guardian_external_member_id") else member_rows).append((row_num, row))
+
+    created_members: list[Member] = []
+    created_dependents: list[Dependent] = []
     errors: list[dict] = []
-    for row_num, row in enumerate(reader, start=2):  # header is row 1
-        row = {k: (v or "").strip() for k, v in row.items()}
+    members_by_external_id: dict[str, Member] = {}
+
+    for row_num, row in member_rows:
+        parsed = {k: v for k, v in row.items() if k not in ("guardian_external_member_id", "external_dependent_id")}
         for bool_field in ("consent_sms", "consent_email"):
-            if bool_field in row:
-                row[bool_field] = row[bool_field].lower() in CSV_BOOL_TRUE
-        if "conditions" in row:
-            row["conditions"] = [c.strip() for c in row["conditions"].split("|") if c.strip()]
-        row = {
-            k: v
-            for k, v in row.items()
-            if v != "" or k in ("consent_sms", "consent_email", "conditions")
+            if bool_field in parsed:
+                parsed[bool_field] = parsed[bool_field].lower() in CSV_BOOL_TRUE
+        if "conditions" in parsed:
+            parsed["conditions"] = [c.strip() for c in parsed["conditions"].split("|") if c.strip()]
+        parsed = {k: v for k, v in parsed.items() if v != "" or k in ("consent_sms", "consent_email", "conditions")}
+        try:
+            item = MemberCreate(**parsed)
+        except ValidationError as e:
+            errors.append({"row": row_num, "type": "member", "external_id": row.get("external_member_id", ""), "error": str(e)})
+            continue
+        member = await _create_member(db, staff.tenant_id, item)
+        created_members.append(member)
+        members_by_external_id[item.external_member_id] = member
+
+    for row_num, row in dependent_rows:
+        guardian_external_id = row["guardian_external_member_id"]
+        guardian = members_by_external_id.get(guardian_external_id)
+        if guardian is None:
+            guardian = (
+                await db.execute(
+                    select(Member).where(
+                        Member.tenant_id == staff.tenant_id, Member.external_member_id == guardian_external_id
+                    )
+                )
+            ).scalar_one_or_none()
+        if guardian is None:
+            errors.append(
+                {
+                    "row": row_num,
+                    "type": "dependent",
+                    "external_id": row.get("external_dependent_id", ""),
+                    "error": f"Guardian '{guardian_external_id}' not found (add them in this file or an earlier upload)",
+                }
+            )
+            continue
+
+        parsed = {
+            "external_dependent_id": row.get("external_dependent_id", ""),
+            "first_name": row.get("first_name", ""),
+            "last_name": row.get("last_name", ""),
+            "date_of_birth": row.get("date_of_birth", ""),
+            "sex": row.get("sex") or "U",
         }
         try:
-            item = MemberCreate(**row)
+            item = DependentCreate(**parsed)
         except ValidationError as e:
-            errors.append({"row": row_num, "external_member_id": row.get("external_member_id", ""), "error": str(e)})
+            errors.append({"row": row_num, "type": "dependent", "external_id": parsed["external_dependent_id"], "error": str(e)})
             continue
-        created.append(await _create_member(db, staff.tenant_id, item))
+        created_dependents.append(await _create_dependent(db, guardian, item))
 
     await db.commit()
-    for member in created:
+    for member in created_members:
         await db.refresh(member)
+    for dependent in created_dependents:
+        await db.refresh(dependent)
 
     return {
-        "created": len(created),
+        "members_created": len(created_members),
+        "dependents_created": len(created_dependents),
         "errors": errors,
-        "members": [MemberOut.model_validate(m) for m in created],
+        "members": [MemberOut.model_validate(m) for m in created_members],
+        "dependents": [DependentOut.model_validate(d) for d in created_dependents],
     }
 
 

@@ -173,9 +173,11 @@ a permissions/quota issue in the AWS account, not a bug in `infra/`.
 - WCV only covers ages 3-17 of HEDIS's real 0-21 eligible population (no
   infant/toddler visit-count logic, no young-adult band)
 - Real roster ingestion from an actual payer eligibility feed format (834,
-  or whatever the first real payer sends) — currently JSON bulk + CSV upload
-  (CSV now includes a `conditions` column, pipe-separated). Dependents have no
-  bulk/CSV ingestion yet, only single-create via API.
+  or whatever the first real payer sends) — currently JSON bulk + CSV upload.
+  CSV now ingests members and dependents together in one file
+  (`guardian_external_member_id` column marks a dependent row; dependent rows
+  are processed after all member rows so file ordering doesn't matter, and a
+  guardian can be resolved either from the same upload or an earlier one).
 - Nothing has clinical/HEDIS/legal sign-off yet — see the checklists in
   `docs/HEDIS_COMPLIANCE.md` and `docs/SECURITY_HIPAA.md`, both currently
   unsigned

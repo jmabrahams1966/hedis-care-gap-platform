@@ -6,7 +6,7 @@ from ..db import get_db
 from ..deps import require_role
 from ..models import Dependent, Member, StaffRole, StaffUser
 from ..schemas import DependentCreate, DependentOut
-from .members import _alias, _open_care_gaps_for_dependent
+from .members import _create_dependent
 
 router = APIRouter(prefix="/api/members", tags=["dependents"])
 
@@ -21,25 +21,13 @@ async def create_dependent(
     """Register a minor dependent under a guardian member — the account
     holder who already receives outreach continues to; pediatric measures
     (Childhood Immunization Status, Well-Child Visits) evaluate eligibility
-    against the dependent, not the guardian."""
+    against the dependent, not the guardian. For loading many dependents at
+    once, see POST /api/members/bulk-csv instead."""
     guardian = await db.get(Member, member_id)
     if guardian is None or guardian.tenant_id != staff.tenant_id:
         raise HTTPException(404, "Guardian member not found")
 
-    dependent = Dependent(
-        tenant_id=guardian.tenant_id,
-        guardian_member_id=guardian.id,
-        external_dependent_id=body.external_dependent_id,
-        first_name=body.first_name,
-        last_name=body.last_name,
-        date_of_birth=body.date_of_birth,
-        sex=body.sex,
-    )
-    dependent.alias = _alias(guardian.tenant_id, body.external_dependent_id, prefix="Dependent")
-    db.add(dependent)
-    await db.flush()
-
-    await _open_care_gaps_for_dependent(db, dependent)
+    dependent = await _create_dependent(db, guardian, body)
     await db.commit()
     await db.refresh(dependent)
     return dependent
