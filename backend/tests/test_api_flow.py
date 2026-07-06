@@ -60,10 +60,12 @@ async def test_full_tenant_and_screening_flow(client: AsyncClient):
 
     pa_token = await _login(client, admin_email, "admin-password-123")
 
-    # --- measure catalog reflects both enabled ---
+    # --- measure catalog reflects both enabled, others in the registry left disabled ---
     res = await client.get("/api/tenants/measures/catalog", headers=_auth(pa_token))
     catalog = {m["code"]: m["enabled"] for m in res.json()}
-    assert catalog == {"mental_health": True, "breast_cancer": True}
+    assert catalog["mental_health"] is True
+    assert catalog["breast_cancer"] is True
+    assert catalog["colorectal_cancer"] is False
 
     # --- create a member eligible for BOTH measures (female, 55) ---
     this_year = date.today().year
@@ -208,3 +210,64 @@ async def test_full_tenant_and_screening_flow(client: AsyncClient):
     )
     bcs_report = res.json()
     assert bcs_report["denominator"] == 0
+
+
+@pytest.mark.asyncio
+async def test_condition_gated_measures_only_open_for_members_with_the_condition(client: AsyncClient):
+    """blood_pressure and diabetes_a1c require a diagnosis on file — this is the
+    first condition-gated (not just age/sex-gated) measure, worth its own
+    end-to-end check via the real roster-ingestion + eligibility path."""
+    sa_email, sa_password = await _make_super_admin()
+    sa_token = await _login(client, sa_email, sa_password)
+
+    slug = f"condgate-{uuid.uuid4().hex[:8]}"
+    admin_email = f"admin-{uuid.uuid4().hex[:8]}@example.com"
+    res = await client.post(
+        "/api/tenants",
+        json={
+            "slug": slug,
+            "name": "Condition Gate Test Plan",
+            "enabled_measures": ["blood_pressure", "diabetes_a1c"],
+            "first_admin_email": admin_email,
+            "first_admin_password": "admin-password-123",
+        },
+        headers=_auth(sa_token),
+    )
+    assert res.status_code == 200, res.text
+    pa_token = await _login(client, admin_email, "admin-password-123")
+
+    this_year = date.today().year
+    res = await client.post(
+        "/api/members",
+        json={
+            "external_member_id": "COND-1",
+            "first_name": "Has",
+            "last_name": "Hypertension",
+            "date_of_birth": f"{this_year - 50}-01-01",
+            "sex": "M",
+            "conditions": ["hypertension"],
+        },
+        headers=_auth(pa_token),
+    )
+    assert res.status_code == 200
+
+    res = await client.post(
+        "/api/members",
+        json={
+            "external_member_id": "COND-2",
+            "first_name": "No",
+            "last_name": "Conditions",
+            "date_of_birth": f"{this_year - 50}-01-01",
+            "sex": "M",
+            "conditions": [],
+        },
+        headers=_auth(pa_token),
+    )
+    assert res.status_code == 200
+
+    res = await client.get("/api/care-gaps/queue", headers=_auth(pa_token))
+    gaps = res.json()
+    assert any(g["member_alias"] and g["measure_code"] == "blood_pressure" for g in gaps)
+    # exactly one blood_pressure gap total — the member without the condition never got one
+    assert sum(1 for g in gaps if g["measure_code"] == "blood_pressure") == 1
+    assert sum(1 for g in gaps if g["measure_code"] == "diabetes_a1c") == 0

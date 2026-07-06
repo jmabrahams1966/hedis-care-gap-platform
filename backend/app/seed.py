@@ -11,15 +11,15 @@ from .routers.members import _alias, _open_care_gaps_for_member
 from .security import hash_password
 
 DEMO_MEMBERS = [
-    # external_id, first, last, dob, sex, phone, email
-    ("EXT-1001", "Alice", "Nguyen", "1988-03-14", "F", "+15550001001", "alice@example.com"),
-    ("EXT-1002", "Ben", "Torres", "1975-07-02", "M", "+15550001002", "ben@example.com"),
-    ("EXT-1003", "Carla", "Smith", "2006-11-30", "F", "+15550001003", "carla@example.com"),
-    ("EXT-1004", "Deepak", "Rao", "1962-01-19", "M", "+15550001004", "deepak@example.com"),
-    ("EXT-1005", "Elena", "Petrova", "1995-09-08", "F", "+15550001005", "elena@example.com"),
-    # BCS-eligible (female, 50-74)
-    ("EXT-1006", "Fatima", "Hassan", "1970-05-12", "F", "+15550001006", "fatima@example.com"),
-    ("EXT-1007", "Grace", "Kim", "1955-02-20", "F", "+15550001007", "grace@example.com"),
+    # external_id, first, last, dob, sex, conditions, phone, email
+    ("EXT-1001", "Alice", "Nguyen", "1988-03-14", "F", [], "+15550001001", "alice@example.com"),
+    ("EXT-1002", "Ben", "Torres", "1975-07-02", "M", ["hypertension"], "+15550001002", "ben@example.com"),
+    ("EXT-1003", "Carla", "Smith", "2006-11-30", "F", [], "+15550001003", "carla@example.com"),
+    ("EXT-1004", "Deepak", "Rao", "1962-01-19", "M", ["hypertension", "diabetes"], "+15550001004", "deepak@example.com"),
+    ("EXT-1005", "Elena", "Petrova", "1995-09-08", "F", [], "+15550001005", "elena@example.com"),
+    # BCS/COL-eligible (female, 50-74)
+    ("EXT-1006", "Fatima", "Hassan", "1970-05-12", "F", ["diabetes"], "+15550001006", "fatima@example.com"),
+    ("EXT-1007", "Grace", "Kim", "1955-02-20", "F", ["hypertension"], "+15550001007", "grace@example.com"),
 ]
 
 
@@ -45,8 +45,8 @@ async def seed_demo_tenant(db: AsyncSession) -> None:
     db.add(tenant)
     await db.flush()
 
-    db.add(TenantMeasureConfig(tenant_id=tenant.id, measure_code="mental_health", enabled=True))
-    db.add(TenantMeasureConfig(tenant_id=tenant.id, measure_code="breast_cancer", enabled=True))
+    for measure_code in ("mental_health", "breast_cancer", "colorectal_cancer", "blood_pressure", "diabetes_a1c"):
+        db.add(TenantMeasureConfig(tenant_id=tenant.id, measure_code=measure_code, enabled=True))
 
     db.add(
         StaffUser(
@@ -77,7 +77,7 @@ async def seed_demo_tenant(db: AsyncSession) -> None:
     )
     await db.flush()
 
-    for external_id, first, last, dob, sex, phone, email in DEMO_MEMBERS:
+    for external_id, first, last, dob, sex, conditions, phone, email in DEMO_MEMBERS:
         member = Member(
             tenant_id=tenant.id,
             external_member_id=external_id,
@@ -85,6 +85,7 @@ async def seed_demo_tenant(db: AsyncSession) -> None:
             last_name=last,
             date_of_birth=dob,
             sex=sex,
+            conditions=conditions,
             phone=phone,
             email=email,
             preferred_channel="sms",

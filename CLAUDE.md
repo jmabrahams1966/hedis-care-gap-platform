@@ -10,18 +10,36 @@ Multi-tenant remote patient outreach platform for health plans (payers) — SMS/
 email check-ins that close HEDIS care gaps. Built around a pluggable measure
 architecture: a tenant elects which HEDIS measure modules are active
 (`backend/app/measures/`), each with its own eligibility rules, outreach
-templates, and gap tracking. Two modules exist so far:
+templates, and gap tracking. Five modules exist so far, covering three
+structurally different shapes:
 
 - **Mental health** (Depression Screening & Follow-Up / DSF) — PHQ-9 + GAD-7
-  questionnaire, server-side scored, safety-flag escalation
-- **Breast Cancer Screening** (BCS) — self-report + scheduling-assistance
-  flow, structurally different from DSF (proves the architecture generalizes)
+  questionnaire, server-side scored, safety-flag escalation. Age-gated (12+).
+- **Breast Cancer Screening** (BCS) and **Colorectal Cancer Screening** (COL) —
+  self-report + scheduling-assistance flow, no instrument. Age-gated (+ sex,
+  for BCS).
+- **Controlling High Blood Pressure** (CBP) and **Diabetes HbA1c Testing &
+  Control** (CDC subset) — self-reported clinical reading. **Condition-gated**:
+  eligibility requires a diagnosis on `Member.conditions`
+  (e.g. `["hypertension"]`), not just age/sex — the first measures where that
+  distinction mattered. CBP also introduces a non-mental-health safety flag
+  (hypertensive crisis, systolic >=180 or diastolic >=120).
+
+**Deliberately not built yet**: Childhood Immunization Status and Well-Child
+Visits. Both are pediatric — the person being screened is a child, not the
+account holder answering the outreach. `Member` currently conflates "the
+enrollee" and "the person answering questions about themselves," which works
+for all five adult measures above but doesn't fit a guardian/dependent
+relationship. Don't bolt child data onto an adult `Member` row if you pick
+this up — model the relationship properly first. See
+`docs/HEDIS_COMPLIANCE.md` §8 for more detail.
 
 ## Current status
 
 - **Backend**: FastAPI + async SQLAlchemy. Fully working locally (SQLite,
-  dev_mode). 22 passing tests (`backend/tests/`). Alembic wired up
-  (`backend/migrations/`) with an initial migration already generated.
+  dev_mode). 45 passing tests (`backend/tests/`). Alembic wired up
+  (`backend/migrations/`) with two migrations generated (initial schema, then
+  the `Member.conditions` column).
 - **Frontend**: React + TS + Vite. Redesigned UI (design system, shared nav,
   step indicators) as of the last commit. Verified in-browser across every
   page/role at desktop + mobile widths.
@@ -103,18 +121,33 @@ a permissions/quota issue in the AWS account, not a bug in `infra/`.
   (which needs a rolling ~27-month lookback per the real HEDIS spec). Flagged
   in `docs/HEDIS_COMPLIANCE.md` but not fixed yet — worth doing before BCS
   numbers go anywhere official.
-- **BCS numerator is currently self-report.** Real HEDIS BCS credit normally
-  needs claims/encounter confirmation. Flagged, not implemented.
+- **BCS/COL numerator is currently self-report.** Real HEDIS credit for both
+  normally needs claims/encounter confirmation. Flagged, not implemented.
+- **`Member.conditions`** (JSON list, e.g. `["hypertension", "diabetes"]`) is
+  the mechanism for diagnosis-gated eligibility — added for CBP/CDC. Use this,
+  not a one-off boolean field, for any future condition-gated measure.
+- **CBP/CDC numerator is a self-reported reading/value**, not a clinical or
+  claims-confirmed one. This is a bigger caveat than BCS/COL's self-report
+  issue — a home BP cuff or a remembered A1c value can genuinely differ from
+  the chart. Explicit clinical sign-off needed before relying on this for
+  anything beyond outreach triage. See `docs/HEDIS_COMPLIANCE.md` §4-5.
+- **CDC here is the HbA1c sub-measure only** — the full HEDIS Comprehensive
+  Diabetes Care bundle also includes eye exam and nephropathy monitoring,
+  neither implemented.
 
 ## Known gaps / good next steps
 
+- Pediatric measures (Childhood Immunization Status, Well-Child Visits) need
+  a guardian/dependent relationship modeled first — see above
 - MFA for staff logins (password + JWT only today)
 - WAF in front of the ALB/CloudFront (not yet in Terraform)
 - Field-level encryption for member PII beyond whole-disk/at-rest
-- Fix `CareGap.period` for BCS's actual lookback window
-- Claims-based (not self-report) numerator confirmation for BCS
+- Fix `CareGap.period` for BCS/COL's actual lookback windows (multi-year, not
+  calendar-year — and COL's varies by screening modality)
+- Claims-based (not self-report) numerator confirmation for BCS, COL, CBP, CDC
 - Real roster ingestion from an actual payer eligibility feed format (834,
   or whatever the first real payer sends) — currently JSON bulk + CSV upload
+  (CSV now includes a `conditions` column, pipe-separated)
 - Nothing has clinical/HEDIS/legal sign-off yet — see the checklists in
   `docs/HEDIS_COMPLIANCE.md` and `docs/SECURITY_HIPAA.md`, both currently
   unsigned
@@ -126,7 +159,7 @@ backend/app/measures/        Pluggable measure modules (start here to add a new 
 backend/app/outreach_service.py   Shared outreach-send logic
 backend/app/scripts/run_outreach_cron.py   Scheduled batch job entrypoint
 backend/migrations/           Alembic — run `alembic upgrade head` for prod schema changes
-backend/tests/                pytest suite, 22 tests, run with pytest.ini config
+backend/tests/                pytest suite, 45 tests, run with pytest.ini config
 frontend/src/components/      Shared AppNav, StepIndicator
 frontend/src/styles/theme.css Design tokens
 infra/                        Terraform — validated, not applied

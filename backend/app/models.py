@@ -129,6 +129,7 @@ class Member(Base):
     last_name: Mapped[str] = mapped_column(String(128))
     date_of_birth: Mapped[str] = mapped_column(String(10))  # YYYY-MM-DD
     sex: Mapped[str] = mapped_column(String(1), default="U")  # "F" | "M" | "U" — used by sex-specific measure eligibility (e.g. BCS)
+    conditions: Mapped[list] = mapped_column(JSON, default=list)  # e.g. ["hypertension", "diabetes"] — condition-gated measure eligibility
     phone: Mapped[str] = mapped_column(String(32), default="")
     email: Mapped[str] = mapped_column(String(255), default="")
     preferred_channel: Mapped[str] = mapped_column(String(16), default=Channel.sms.value)

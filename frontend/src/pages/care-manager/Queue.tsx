@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useSession } from "../../context/SessionContext";
 import { api } from "../../lib/api";
+import { MEASURE_LABELS } from "../../data/measures";
 
 interface GapRow {
   id: string;
@@ -13,11 +14,6 @@ interface GapRow {
   follow_up_due_at: string | null;
   member_alias: string;
 }
-
-const MEASURE_LABELS: Record<string, string> = {
-  mental_health: "Depression Screening & Follow-Up",
-  breast_cancer: "Breast Cancer Screening",
-};
 
 const FILTERS = [
   { key: "all", label: "All open" },

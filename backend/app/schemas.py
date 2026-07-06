@@ -54,6 +54,7 @@ class MemberCreate(BaseModel):
     last_name: str
     date_of_birth: str  # YYYY-MM-DD
     sex: str = "U"  # "F" | "M" | "U"
+    conditions: list[str] = []  # e.g. ["hypertension", "diabetes"]
     phone: str = ""
     email: str = ""
     preferred_channel: str = "sms"
@@ -68,6 +69,7 @@ class MemberOut(BaseModel):
     first_name: str
     last_name: str
     sex: str
+    conditions: list[str]
     alias: str
     preferred_channel: str
     consent_sms: bool

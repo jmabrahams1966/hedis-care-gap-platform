@@ -16,7 +16,14 @@ interface SubmitResult {
   needs_follow_up: boolean;
 }
 
-type Outcome = "safety" | "done" | "help_scheduling";
+interface Outcome {
+  kind: "safety" | "done";
+  heading?: string;
+  body: React.ReactNode;
+}
+
+type OnSubmit = (responses: Record<string, unknown>) => Promise<SubmitResult>;
+type OnOutcome = (o: Outcome) => void;
 
 export default function ScreeningFlow() {
   const { member } = useSession();
@@ -58,42 +65,49 @@ export default function ScreeningFlow() {
   if (loadState === "none_due")
     return <Shell>You're all caught up — thanks! There's nothing due for you right now.</Shell>;
 
-  if (outcome === "safety") {
+  if (outcome?.kind === "safety") {
     return (
       <div className="app-shell">
         <div className="safety-card">
-          <h2>You're not alone</h2>
-          <p>
-            Based on your answers, we want to make sure you have support right now. If you are in crisis or
-            thinking about harming yourself, please reach out immediately:
-          </p>
-          <p>
-            <strong>988 Suicide &amp; Crisis Lifeline</strong> — call or text 988, available 24/7
-            <br />
-            <strong>Crisis Text Line</strong> — text HOME to 741741
-          </p>
-          <p style={{ marginBottom: 0 }}>A care manager from your health plan will also be reaching out to check in with you.</p>
+          {outcome.heading && <h2>{outcome.heading}</h2>}
+          {outcome.body}
         </div>
       </div>
     );
   }
 
-  if (outcome === "help_scheduling") {
-    return <Shell success>Thanks! A care manager from your health plan will reach out soon to help you schedule.</Shell>;
+  if (outcome?.kind === "done") {
+    return <Shell success>{outcome.body}</Shell>;
   }
 
-  if (outcome === "done") {
-    return (
-      <Shell success>
-        Thanks, {member?.firstName}! Your check-in is complete. A care team member may follow up if needed.
-      </Shell>
-    );
+  switch (gap?.measure_code) {
+    case "breast_cancer":
+      return (
+        <YesNoScheduleFlow
+          onSubmit={submit}
+          onOutcome={setOutcome}
+          question="Have you had a mammogram (breast cancer screening) in the last 2 years?"
+          responseKey="has_completed"
+          doneBody={(name) => <>Thanks, {name}! Your check-in is complete.</>}
+        />
+      );
+    case "colorectal_cancer":
+      return (
+        <YesNoScheduleFlow
+          onSubmit={submit}
+          onOutcome={setOutcome}
+          question="Have you completed a colorectal cancer screening (colonoscopy, FIT/FOBT test, or similar) within the recommended timeframe?"
+          responseKey="has_completed"
+          doneBody={(name) => <>Thanks, {name}! Your check-in is complete.</>}
+        />
+      );
+    case "blood_pressure":
+      return <BloodPressureFlow onSubmit={submit} onOutcome={setOutcome} />;
+    case "diabetes_a1c":
+      return <DiabetesA1cFlow onSubmit={submit} onOutcome={setOutcome} />;
+    default:
+      return <MentalHealthFlow onSubmit={submit} onOutcome={setOutcome} />;
   }
-
-  if (gap?.measure_code === "breast_cancer") {
-    return <BreastCancerFlow onSubmit={submit} onOutcome={setOutcome} />;
-  }
-  return <MentalHealthFlow onSubmit={submit} onOutcome={setOutcome} />;
 }
 
 function Shell({ children, success = false }: { children: React.ReactNode; success?: boolean }) {
@@ -107,13 +121,8 @@ function Shell({ children, success = false }: { children: React.ReactNode; succe
   );
 }
 
-function MentalHealthFlow({
-  onSubmit,
-  onOutcome,
-}: {
-  onSubmit: (responses: Record<string, unknown>) => Promise<SubmitResult>;
-  onOutcome: (o: Outcome) => void;
-}) {
+function MentalHealthFlow({ onSubmit, onOutcome }: { onSubmit: OnSubmit; onOutcome: OnOutcome }) {
+  const { member } = useSession();
   const [step, setStep] = useState<"phq9" | "gad7">("phq9");
   const [phq9, setPhq9] = useState<number[]>(Array(PHQ9_ITEMS.length).fill(-1));
   const [gad7, setGad7] = useState<number[]>(Array(GAD7_ITEMS.length).fill(-1));
@@ -122,7 +131,37 @@ function MentalHealthFlow({
   async function handleFinalSubmit(finalGad7: number[]) {
     try {
       const res = await onSubmit({ phq9, gad7: finalGad7 });
-      onOutcome(res.safety_flag ? "safety" : "done");
+      if (res.safety_flag) {
+        onOutcome({
+          kind: "safety",
+          heading: "You're not alone",
+          body: (
+            <>
+              <p>
+                Based on your answers, we want to make sure you have support right now. If you are in crisis or
+                thinking about harming yourself, please reach out immediately:
+              </p>
+              <p>
+                <strong>988 Suicide &amp; Crisis Lifeline</strong> — call or text 988, available 24/7
+                <br />
+                <strong>Crisis Text Line</strong> — text HOME to 741741
+              </p>
+              <p style={{ marginBottom: 0 }}>
+                A care manager from your health plan will also be reaching out to check in with you.
+              </p>
+            </>
+          ),
+        });
+      } else {
+        onOutcome({
+          kind: "done",
+          body: (
+            <>
+              Thanks, {member?.firstName}! Your check-in is complete. A care team member may follow up if needed.
+            </>
+          ),
+        });
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not submit. Please try again.");
     }
@@ -163,13 +202,22 @@ function MentalHealthFlow({
   );
 }
 
-function BreastCancerFlow({
+/** Shared shape for the self-report + scheduling-assist measures (BCS, COL):
+ * "have you completed this?" then, if not, "want help scheduling?" */
+function YesNoScheduleFlow({
   onSubmit,
   onOutcome,
+  question,
+  responseKey,
+  doneBody,
 }: {
-  onSubmit: (responses: Record<string, unknown>) => Promise<SubmitResult>;
-  onOutcome: (o: Outcome) => void;
+  onSubmit: OnSubmit;
+  onOutcome: OnOutcome;
+  question: string;
+  responseKey: string;
+  doneBody: (firstName?: string) => React.ReactNode;
 }) {
+  const { member } = useSession();
   const [hasCompleted, setHasCompleted] = useState<boolean | null>(null);
   const [wantsHelp, setWantsHelp] = useState<boolean | null>(null);
   const [error, setError] = useState("");
@@ -179,8 +227,15 @@ function BreastCancerFlow({
     setSubmitting(true);
     setError("");
     try {
-      await onSubmit({ has_completed: hasCompleted, wants_scheduling_help: wantsHelp ?? false });
-      onOutcome(!hasCompleted && wantsHelp ? "help_scheduling" : "done");
+      await onSubmit({ [responseKey]: hasCompleted, wants_scheduling_help: wantsHelp ?? false });
+      if (!hasCompleted && wantsHelp) {
+        onOutcome({
+          kind: "done",
+          body: <>Thanks! A care manager from your health plan will reach out soon to help you schedule.</>,
+        });
+      } else {
+        onOutcome({ kind: "done", body: doneBody(member?.firstName) });
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not submit. Please try again.");
     } finally {
@@ -193,7 +248,7 @@ function BreastCancerFlow({
       <StepIndicator step={hasCompleted === false ? 1 : 0} total={hasCompleted === false ? 2 : 1} />
       {error && <p className="error-text">{error}</p>}
       <div className="card">
-        <p>Have you had a mammogram (breast cancer screening) in the last 2 years?</p>
+        <p>{question}</p>
         <label className="choice">
           <input
             type="radio"
@@ -221,12 +276,7 @@ function BreastCancerFlow({
         <div className="card">
           <p>Would you like help scheduling one?</p>
           <label className="choice">
-            <input
-              type="radio"
-              name="wants_help"
-              checked={wantsHelp === true}
-              onChange={() => setWantsHelp(true)}
-            />
+            <input type="radio" name="wants_help" checked={wantsHelp === true} onChange={() => setWantsHelp(true)} />
             Yes, please have someone reach out
           </label>
           <label className="choice" style={{ marginBottom: 0 }}>
@@ -247,6 +297,173 @@ function BreastCancerFlow({
         onClick={finish}
         style={{ width: "100%" }}
       >
+        {submitting ? "Submitting…" : "Submit"}
+      </button>
+    </div>
+  );
+}
+
+function BloodPressureFlow({ onSubmit, onOutcome }: { onSubmit: OnSubmit; onOutcome: OnOutcome }) {
+  const [systolic, setSystolic] = useState("");
+  const [diastolic, setDiastolic] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const sys = Number(systolic);
+  const dia = Number(diastolic);
+  const valid = systolic !== "" && diastolic !== "" && sys >= 50 && sys <= 300 && dia >= 30 && dia <= 200;
+
+  async function finish() {
+    setSubmitting(true);
+    setError("");
+    try {
+      const res = await onSubmit({ systolic: sys, diastolic: dia });
+      if (res.safety_flag) {
+        onOutcome({
+          kind: "safety",
+          heading: "Please seek care right away",
+          body: (
+            <>
+              <p>
+                A reading of {sys}/{dia} is in a range that needs urgent attention. Please call 911 or go to the
+                nearest emergency room now if you're experiencing chest pain, shortness of breath, severe headache,
+                or vision changes.
+              </p>
+              <p style={{ marginBottom: 0 }}>A care manager from your health plan will also follow up with you today.</p>
+            </>
+          ),
+        });
+      } else if (res.needs_follow_up) {
+        onOutcome({
+          kind: "done",
+          body: (
+            <>
+              Thanks for checking in. Your reading is above goal, so a care manager will follow up with you soon
+              about next steps.
+            </>
+          ),
+        });
+      } else {
+        onOutcome({ kind: "done", body: <>Thanks for checking in — your reading looks on target.</> });
+      }
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not submit. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="app-shell">
+      {error && <p className="error-text">{error}</p>}
+      <div className="card">
+        <p>What was your most recent blood pressure reading?</p>
+        <label htmlFor="systolic">Top number (systolic)</label>
+        <input
+          id="systolic"
+          type="number"
+          inputMode="numeric"
+          value={systolic}
+          onChange={(e) => setSystolic(e.target.value)}
+          placeholder="e.g. 128"
+        />
+        <label htmlFor="diastolic">Bottom number (diastolic)</label>
+        <input
+          id="diastolic"
+          type="number"
+          inputMode="numeric"
+          value={diastolic}
+          onChange={(e) => setDiastolic(e.target.value)}
+          placeholder="e.g. 82"
+        />
+      </div>
+      <button className="btn" disabled={submitting || !valid} onClick={finish} style={{ width: "100%" }}>
+        {submitting ? "Submitting…" : "Submit"}
+      </button>
+    </div>
+  );
+}
+
+function DiabetesA1cFlow({ onSubmit, onOutcome }: { onSubmit: OnSubmit; onOutcome: OnOutcome }) {
+  const [hasTest, setHasTest] = useState<boolean | null>(null);
+  const [a1c, setA1c] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function finish() {
+    setSubmitting(true);
+    setError("");
+    try {
+      const res = await onSubmit({
+        has_recent_test: hasTest,
+        a1c_value: hasTest && a1c !== "" ? Number(a1c) : null,
+      });
+      if (res.needs_follow_up && hasTest) {
+        onOutcome({
+          kind: "done",
+          body: <>Thanks for checking in. A care manager will follow up with you soon about your results.</>,
+        });
+      } else if (res.needs_follow_up) {
+        onOutcome({
+          kind: "done",
+          body: <>Thanks! A care manager will reach out to help you schedule an HbA1c test.</>,
+        });
+      } else {
+        onOutcome({ kind: "done", body: <>Thanks for checking in — you're on track.</> });
+      }
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not submit. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const valid = hasTest === false || (hasTest === true && a1c !== "" && Number(a1c) > 0 && Number(a1c) < 20);
+
+  return (
+    <div className="app-shell">
+      {error && <p className="error-text">{error}</p>}
+      <div className="card">
+        <p>Have you had an HbA1c test (a diabetes blood test) in the last year?</p>
+        <label className="choice">
+          <input
+            type="radio"
+            name="has_test"
+            checked={hasTest === true}
+            onChange={() => setHasTest(true)}
+          />
+          Yes
+        </label>
+        <label className="choice" style={{ marginBottom: 0 }}>
+          <input
+            type="radio"
+            name="has_test"
+            checked={hasTest === false}
+            onChange={() => {
+              setHasTest(false);
+              setA1c("");
+            }}
+          />
+          No, not yet
+        </label>
+      </div>
+
+      {hasTest === true && (
+        <div className="card">
+          <label htmlFor="a1c">If you know it, what was your result (%)?</label>
+          <input
+            id="a1c"
+            type="number"
+            step="0.1"
+            inputMode="decimal"
+            value={a1c}
+            onChange={(e) => setA1c(e.target.value)}
+            placeholder="e.g. 7.2"
+          />
+        </div>
+      )}
+
+      <button className="btn" disabled={submitting || hasTest === null || !valid} onClick={finish} style={{ width: "100%" }}>
         {submitting ? "Submitting…" : "Submit"}
       </button>
     </div>

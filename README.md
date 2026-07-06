@@ -1,11 +1,12 @@
 # HEDIS Care Gap Platform
 
 Multi-tenant remote patient outreach and screening for health plans — SMS/email
-check-ins that close HEDIS care gaps, starting with **Depression Screening and
-Follow-Up (DSF)**. Health plans elect which measure modules are active for
-their members; new measure domains (breast cancer screening, colorectal
-screening, etc.) plug into the same tenant/member/outreach engine without
-touching its schema.
+check-ins that close HEDIS care gaps. Health plans elect which measure modules
+are active for their members; five are implemented so far (Depression
+Screening & Follow-Up, Breast Cancer Screening, Colorectal Cancer Screening,
+Controlling High Blood Pressure, Diabetes HbA1c Testing & Control), each
+plugging into the same tenant/member/outreach engine without touching its
+schema.
 
 > **Status: early scaffold.** Backend and frontend run end-to-end locally with
 > synthetic demo data. AWS infrastructure is written as Terraform but **not
@@ -47,15 +48,20 @@ outreach · ECS Fargate + Route 53 + CloudFront for hosting.
 ```
 backend/
   app/
-    models.py            Tenant, Member, Measure, TenantMeasureConfig, CareGap,
-                          OutreachAttempt, ScreeningSubmission, CaseNote, AuditLog
+    models.py            Tenant, Member (incl. conditions for diagnosis-gated measures),
+                          Measure, TenantMeasureConfig, CareGap, OutreachAttempt,
+                          ScreeningSubmission, CaseNote, AuditLog
     scoring.py            Server-side PHQ-9 / GAD-7 scoring (client never scores)
     measures/             Pluggable measure module registry
       base.py             Measure interface every module implements
-      mental_health.py     HEDIS DSF: PHQ-9 + GAD-7, eligibility, follow-up window
+      mental_health.py     DSF: PHQ-9 + GAD-7, age-gated
+      breast_cancer.py     BCS: self-report + scheduling-assist, age+sex-gated
+      colorectal_cancer.py COL: self-report + scheduling-assist, age-gated
+      blood_pressure.py    CBP: self-reported reading, condition-gated, crisis safety flag
+      diabetes.py          CDC (HbA1c subset): self-reported test/value, condition-gated
     notifications/        SES email + SMS senders, templates (dev-mode safe)
     routers/               auth, tenants, members, screenings, care_gaps, outreach, reports
-    seed.py                Demo tenant + 5 synthetic members (dev_mode only)
+    seed.py                Demo tenant + 7 synthetic members (dev_mode only)
 frontend/
   src/
     pages/member/          Magic-link entry, verify, PHQ-9/GAD-7 flow, safety card
@@ -89,11 +95,11 @@ cd backend
 ./.venv/bin/pip install -r requirements-dev.txt
 ./.venv/bin/python -m pytest tests/ -v
 ```
-Unit tests for scoring (`tests/test_scoring.py`) and both measure modules
+Unit tests for scoring (`tests/test_scoring.py`) and all five measure modules
 (`tests/test_measures.py`) need no DB. `tests/test_api_flow.py` drives the FastAPI
 app end-to-end over `httpx.ASGITransport` against a throwaway SQLite file —
-tenant/member creation, magic-link auth, both measure flows, exclusions, and the
-HEDIS report.
+tenant/member creation, magic-link auth, multiple measure flows, condition-gated
+eligibility, exclusions, and the HEDIS report.
 
 **Frontend**
 ```bash
@@ -104,14 +110,26 @@ npm run dev   # http://localhost:5173, expects the backend on :8099
 
 ## How a measure module works
 
-A "measure" (`backend/app/measures/base.py`) is eligibility rules + scoring +
-a follow-up window. `mental_health.py` implements HEDIS DSF: members 12+ are
-eligible, completing PHQ-9 (+GAD-7) satisfies the numerator, and a
-moderate-or-higher score or a positive safety item opens a follow-up
-requirement tracked on the same `CareGap` row. A tenant elects which measures
-are active (`TenantMeasureConfig`); adding breast cancer screening later means
-writing one more module and registering it in `measures/__init__.py` — no
-changes to tenant, member, or outreach code.
+A "measure" (`backend/app/measures/base.py`) is eligibility rules + submission
+evaluation + a follow-up window. Three distinct shapes exist so far:
+
+- **Structured instrument** (`mental_health.py` — DSF): members 12+ are
+  eligible, completing PHQ-9 (+GAD-7) satisfies the numerator, and a
+  moderate-or-higher score or a positive safety item opens a follow-up.
+- **Self-report + scheduling-assist** (`breast_cancer.py`, `colorectal_cancer.py`
+  — BCS/COL): no instrument, just "have you completed this?" and an offer to
+  help schedule if not. Age (+ sex, for BCS) gated.
+- **Self-reported clinical reading, condition-gated** (`blood_pressure.py`,
+  `diabetes.py` — CBP/CDC): eligibility requires a diagnosis on file
+  (`Member.conditions`), not just age/sex, and the reading itself can trigger a
+  safety flag (BP crisis range) independent of numerator status.
+
+A tenant elects which measures are active (`TenantMeasureConfig`); adding
+another one means writing one more module and registering it in
+`measures/__init__.py` — no changes to tenant, member, or outreach code.
+Pediatric measures (Childhood Immunization Status, Well-Child Visits) are a
+fourth shape not yet built — see `docs/HEDIS_COMPLIANCE.md` §8 for why they
+need a guardian/dependent relationship first.
 
 ## Before production
 

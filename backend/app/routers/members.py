@@ -68,6 +68,7 @@ async def _create_member(db: AsyncSession, tenant_id: str, item: MemberCreate) -
         last_name=item.last_name,
         date_of_birth=item.date_of_birth,
         sex=item.sex,
+        conditions=item.conditions,
         phone=item.phone,
         email=item.email,
         preferred_channel=item.preferred_channel,
@@ -122,7 +123,8 @@ async def bulk_create_members_csv(
 ):
     """Roster ingestion from a CSV eligibility feed. Expected columns:
     external_member_id, first_name, last_name, date_of_birth (YYYY-MM-DD), sex (F/M/U),
-    phone, email, preferred_channel (sms/email), preferred_language, consent_sms, consent_email
+    conditions (pipe-separated, e.g. "hypertension|diabetes"), phone, email,
+    preferred_channel (sms/email), preferred_language, consent_sms, consent_email
     (consent columns accept 1/true/yes as truthy). Unknown/missing optional columns fall back
     to MemberCreate's defaults.
     """
@@ -136,7 +138,13 @@ async def bulk_create_members_csv(
         for bool_field in ("consent_sms", "consent_email"):
             if bool_field in row:
                 row[bool_field] = row[bool_field].lower() in CSV_BOOL_TRUE
-        row = {k: v for k, v in row.items() if v != "" or k in ("consent_sms", "consent_email")}
+        if "conditions" in row:
+            row["conditions"] = [c.strip() for c in row["conditions"].split("|") if c.strip()]
+        row = {
+            k: v
+            for k, v in row.items()
+            if v != "" or k in ("consent_sms", "consent_email", "conditions")
+        }
         try:
             item = MemberCreate(**row)
         except ValidationError as e:

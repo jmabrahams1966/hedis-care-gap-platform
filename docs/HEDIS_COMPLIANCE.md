@@ -80,7 +80,89 @@ completion-confirmation + scheduling-assistance flow.
 - [ ] Scheduling-help follow-up window (14 days) — confirm against your care
       management team's actual SLA for reaching out to help schedule
 
-## 3. Sign-off
+## 3. Measure implemented: Colorectal Cancer Screening (COL)
+
+Implemented in `backend/app/measures/colorectal_cancer.py`. Same self-report +
+scheduling-assistance shape as BCS — no licensed instrument.
+
+- [ ] Obtain the current NCQA HEDIS COL measure specification. Real COL has
+      **multiple modalities with different recency windows** (FIT/FOBT within
+      1 year, flexible sigmoidoscopy within 5 years, CT colonography within 5
+      years, colonoscopy within 10 years) — this module collects an optional
+      `screening_type` on submission but does **not** yet apply modality-specific
+      recency logic; it currently treats any "yes" as numerator-met regardless
+      of which test or when. Fix before relying on this for a real submission.
+- [ ] Eligibility as implemented: ages 45-75, no sex restriction — confirm
+      against the current measure spec (age band was recently lowered from 50
+      to 45 industry-wide; confirm which version your plan reports against)
+      and any exclusions (e.g. total colectomy, hospice)
+- [ ] **Numerator source** — self-report, same caveat as BCS: real HEDIS COL
+      credit is normally claims/encounter-based. Decide whether self-report is
+      an interim signal only.
+- [ ] `CareGap.period` is a calendar year — same mismatch as BCS, worse here
+      given COL's multiple different lookback windows per modality.
+
+## 4. Measure implemented: Controlling High Blood Pressure (CBP)
+
+Implemented in `backend/app/measures/blood_pressure.py`. First measure whose
+eligibility depends on clinical history (`Member.conditions` must include
+`"hypertension"`), not just age/sex — and the first non-mental-health measure
+with its own safety-flag concept (hypertensive crisis).
+
+- [ ] Obtain the current NCQA HEDIS CBP measure specification and confirm
+      eligible population (implemented: ages 18-85 with a hypertension
+      diagnosis) and exclusions (e.g. ESRD, pregnancy, frailty)
+- [ ] **`Member.conditions` is populated at roster ingestion from the payer's
+      feed** (or manually via the API) — confirm this is a reliable source for
+      diagnosis data, not something inferred from member self-report. A member
+      incorrectly missing `"hypertension"` on their record will never be asked
+      about their blood pressure at all.
+- [ ] **Numerator source** — this module accepts a **self-reported home BP
+      reading** as the numerator signal (systolic < 140 and diastolic < 90 =
+      controlled). Real HEDIS CBP numerator credit needs the **most recent
+      outpatient BP reading in the medical record**, not a home/self-reported
+      value. This is meaningfully different from the BCS/COL self-report
+      caveat — a home cuff reading and a clinical reading can differ, and using
+      this for anything beyond member engagement/outreach triage needs
+      explicit clinical sign-off.
+- [ ] Crisis threshold (systolic >= 180 or diastolic >= 120) — this is a widely
+      used hypertensive-crisis threshold, but confirm the exact wording/values
+      and the member-facing message (`ScreeningFlow.tsx`'s `BloodPressureFlow`)
+      with your clinical team before this reaches a real member. As shipped it
+      tells the member to call 911 or go to the ER — verify that's the guidance
+      your plan wants given a home reading (vs. e.g. "call your doctor's office
+      now" for a lower-acuity threshold).
+- [ ] Follow-up windows: 1 day for crisis-range, 14 days for above-goal but not
+      crisis — confirm against your care management team's actual SLA
+
+## 5. Measure implemented: Comprehensive Diabetes Care — HbA1c Testing & Control
+
+Implemented in `backend/app/measures/diabetes.py`. Condition-gated like CBP
+(`Member.conditions` must include `"diabetes"`).
+
+- [ ] **This covers only the HbA1c testing/control sub-measure.** The full
+      HEDIS Comprehensive Diabetes Care (CDC) measure bundle includes several
+      other sub-measures not implemented here — eye exam (retinal screening)
+      and nephropathy (kidney disease) monitoring being the two most
+      significant omissions. Don't report this module's rate as "CDC" without
+      qualifying which sub-measure it is.
+- [ ] Obtain the current NCQA HEDIS CDC (HbA1c) specification and confirm
+      eligible population (implemented: ages 18-75 with a diabetes diagnosis)
+      and exclusions
+- [ ] **Numerator source** — self-reported "I had the test" plus an optional
+      self-reported value. Real HEDIS credit needs a lab-confirmed result, not
+      self-report, and the "poor control" threshold used here (>9.0%) is a
+      reasonable outreach-triage heuristic but is **not** the HEDIS "poor
+      control" numerator definition for the actual measure (which HEDIS
+      inverts — CDC's headline sub-measure is typically framed as "% with
+      *poor* control >9.0", i.e. a measure you want a *low* rate on; confirm
+      you're not accidentally reporting this inverted against the wrong
+      polarity when this feeds anywhere official).
+- [ ] Follow-up window (30 days) for both "not tested" and "poor control" —
+      confirm against your care team's actual outreach SLA, and consider
+      whether poor control should have a shorter window than "not yet tested"
+
+## 6. Sign-off
 
 | Role | Name | Signature | Date |
 |---|---|---|---|
@@ -93,7 +175,7 @@ completion-confirmation + scheduling-assistance flow.
 > protocols with a licensed clinical supervisor, your HEDIS auditor, and legal
 > counsel before any real member outreach.
 
-## 4. Reporting & submission
+## 7. Reporting & submission
 
 - [ ] Confirm `GET /api/reports/hedis` numerator/denominator logic against your
       HEDIS auditor's expectations before using it for any real submission
@@ -102,22 +184,35 @@ completion-confirmation + scheduling-assistance flow.
 - [ ] Determine whether this platform's data needs to feed a HEDIS supplemental
       data submission to the payer's primary quality reporting system, or is the
       system of record itself
-- [ ] Build the exclusion workflow (`GapStatus.excluded`) — currently a status
-      value exists but nothing in the UI sets it yet
-- [ ] Fix `CareGap.period` to be measure-appropriate (calendar year works for
-      DSF; BCS needs a rolling/lookback period, not a fixed year)
+- [ ] Exclusion workflow exists (`GapStatus.excluded`, requires a reason) — confirm
+      the reasons your care managers use actually match acceptable HEDIS
+      exclusion categories, since right now it accepts any free-text reason
+- [ ] Fix `CareGap.period` to be measure-appropriate — calendar year works for
+      DSF/CBP/CDC (annual measures) but **not** for BCS/COL, which use
+      multi-year rolling lookback windows
 
-## 5. Adding a new measure module
+## 8. Adding a new measure module
 
-To add a measure beyond mental health and breast cancer screening:
+To add a measure beyond the five implemented so far:
 
 1. Implement `Measure` (`backend/app/measures/base.py`): `is_eligible`,
    `evaluate_submission`, `follow_up_window_days`.
 2. Register it in `backend/app/measures/__init__.py`.
 3. Add a section to this document with its own instrument-licensing/eligibility/
    numerator-source table before enabling it for any real tenant.
-4. Decide the numerator source up front — self-report (like BCS here), a
-   structured instrument (like DSF here), or claims/encounter data — and be
-   explicit in this doc about which one and why, since that decision drives
-   whether the measure's HEDIS rate can be reported as-is or needs claims
-   reconciliation first.
+4. Decide the numerator source up front — self-report (BCS/COL), a structured
+   instrument (DSF), a self-reported clinical value (CBP/CDC), or claims/
+   encounter data — and be explicit in this doc about which one and why, since
+   that decision drives whether the measure's HEDIS rate can be reported as-is
+   or needs claims reconciliation first.
+5. If eligibility depends on diagnosis/condition rather than just age/sex, use
+   `Member.conditions` (see CBP/CDC) rather than inventing a new field —
+   confirm the roster feed populating it is a real diagnosis source, not
+   inferred from anything the member self-reports.
+6. **Pediatric measures need a different foundation.** Childhood Immunization
+   Status and Well-Child Visits were considered and deliberately deferred —
+   the person being screened (a child) is not the account holder (a
+   parent/guardian) receiving the outreach. `Member` currently models one
+   person who is both the enrollee and the one answering questions about
+   themselves. Don't bolt a child's data onto an adult `Member` row; this
+   needs a guardian/dependent relationship modeled first.

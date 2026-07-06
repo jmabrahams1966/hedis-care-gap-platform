@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useSession } from "../../context/SessionContext";
 import { api } from "../../lib/api";
+import { MEASURE_LABELS } from "../../data/measures";
 
 interface InstrumentScore {
   total: number;
@@ -9,16 +10,37 @@ interface InstrumentScore {
   safety_flag?: boolean;
 }
 
-interface BcsScore {
+interface ScheduleAssistScore {
   has_completed: boolean;
-  completed_date: string | null;
+  completed_date?: string | null;
+  screening_type?: string | null;
   wants_scheduling_help: boolean;
+}
+
+interface BpScore {
+  systolic: number;
+  diastolic: number;
+  controlled: boolean;
+  crisis: boolean;
+}
+
+interface A1cScore {
+  has_recent_test: boolean;
+  value: number | null;
+  poor_control: boolean;
 }
 
 interface Submission {
   submitted_at: string;
   safety_flag: boolean;
-  instrument_scores: { phq9?: InstrumentScore; gad7?: InstrumentScore | null; bcs?: BcsScore };
+  instrument_scores: {
+    phq9?: InstrumentScore;
+    gad7?: InstrumentScore | null;
+    bcs?: ScheduleAssistScore;
+    col?: ScheduleAssistScore;
+    bp?: BpScore;
+    a1c?: A1cScore;
+  };
 }
 
 interface Note {
@@ -38,11 +60,6 @@ interface CaseDetailResponse {
   submissions: Submission[];
   notes: Note[];
 }
-
-const MEASURE_LABELS: Record<string, string> = {
-  mental_health: "Depression Screening & Follow-Up",
-  breast_cancer: "Breast Cancer Screening",
-};
 
 const SEVERITY_BADGE: Record<string, string> = {
   minimal: "done",
@@ -130,8 +147,11 @@ export default function CaseDetail() {
 
       {data.safety_flag && (
         <div className="safety-card">
-          <strong>Safety flag active</strong> — this member indicated thoughts of self-harm. Follow the crisis
-          escalation protocol.
+          <strong>Safety flag active</strong> —{" "}
+          {data.measure_code === "blood_pressure"
+            ? "this member reported a blood pressure reading in the hypertensive crisis range."
+            : "this member indicated thoughts of self-harm."}{" "}
+          Follow the crisis escalation protocol.
         </div>
       )}
 
@@ -179,6 +199,26 @@ export default function CaseDetail() {
                 Mammogram: {s.instrument_scores.bcs.has_completed ? "completed" : "not completed"}
                 {!s.instrument_scores.bcs.has_completed &&
                   (s.instrument_scores.bcs.wants_scheduling_help ? " — wants help" : " — declined help")}
+              </span>
+            )}
+            {s.instrument_scores.col && (
+              <span className={`badge ${s.instrument_scores.col.has_completed ? "done" : "follow-up"}`}>
+                Colorectal screening: {s.instrument_scores.col.has_completed ? "completed" : "not completed"}
+                {!s.instrument_scores.col.has_completed &&
+                  (s.instrument_scores.col.wants_scheduling_help ? " — wants help" : " — declined help")}
+              </span>
+            )}
+            {s.instrument_scores.bp && (
+              <span className={`badge ${s.instrument_scores.bp.crisis ? "safety" : s.instrument_scores.bp.controlled ? "done" : "follow-up"}`}>
+                BP: {s.instrument_scores.bp.systolic}/{s.instrument_scores.bp.diastolic}
+                {s.instrument_scores.bp.crisis ? " — crisis range" : s.instrument_scores.bp.controlled ? " — controlled" : " — above goal"}
+              </span>
+            )}
+            {s.instrument_scores.a1c && (
+              <span className={`badge ${!s.instrument_scores.a1c.has_recent_test || s.instrument_scores.a1c.poor_control ? "follow-up" : "done"}`}>
+                {s.instrument_scores.a1c.has_recent_test
+                  ? `HbA1c: ${s.instrument_scores.a1c.value ?? "unknown"}%${s.instrument_scores.a1c.poor_control ? " — poor control" : ""}`
+                  : "HbA1c: no recent test"}
               </span>
             )}
           </div>
