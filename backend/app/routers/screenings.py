@@ -8,7 +8,7 @@ from ..audit import log_action
 from ..db import get_db
 from ..deps import client_ip, get_current_member
 from ..measures import get_measure
-from ..models import CareGap, Dependent, GapStatus, Member, ScreeningSubmission
+from ..models import CareGap, Dependent, GapStatus, Member, NumeratorSource, ScreeningSubmission
 from ..schemas import ScreeningSubmit
 
 router = APIRouter(prefix="/api/screenings", tags=["screenings"])
@@ -71,7 +71,13 @@ async def submit_screening(
     )
     db.add(submission)
 
-    gap.numerator_met = evaluation["numerator_met"]
+    # A claims-confirmed numerator is stronger evidence than a self-report —
+    # a later, possibly-contradicting self-report shouldn't be able to undo it.
+    if gap.numerator_source != NumeratorSource.claims_confirmed.value:
+        gap.numerator_met = evaluation["numerator_met"]
+        gap.numerator_source = (
+            NumeratorSource.self_report.value if gap.numerator_met else NumeratorSource.unconfirmed.value
+        )
     gap.safety_flag = evaluation["safety_flag"]
     window_days = measure.follow_up_window_days(evaluation)
     if window_days is not None:

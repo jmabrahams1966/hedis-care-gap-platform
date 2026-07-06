@@ -7,8 +7,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..audit import log_action
 from ..db import get_db
 from ..deps import client_ip, require_role
-from ..models import CareGap, CaseNote, Dependent, GapStatus, Member, ScreeningSubmission, StaffRole, StaffUser
-from ..schemas import CaseNoteCreate, GapStatusUpdate
+from ..models import (
+    CareGap,
+    CaseNote,
+    Dependent,
+    GapStatus,
+    Member,
+    NumeratorSource,
+    ScreeningSubmission,
+    StaffRole,
+    StaffUser,
+)
+from ..schemas import CaseNoteCreate, GapStatusUpdate, NumeratorConfirm
 
 router = APIRouter(prefix="/api/care-gaps", tags=["care_gaps"])
 
@@ -47,6 +57,7 @@ async def queue(
             "status": gap.status,
             "safety_flag": gap.safety_flag,
             "numerator_met": gap.numerator_met,
+            "numerator_source": gap.numerator_source,
             "follow_up_due_at": gap.follow_up_due_at,
             "member_alias": member_alias,
             "dependent_alias": dependent_alias,
@@ -76,6 +87,9 @@ async def case_detail(
         "measure_code": gap.measure_code,
         "status": gap.status,
         "safety_flag": gap.safety_flag,
+        "numerator_met": gap.numerator_met,
+        "numerator_source": gap.numerator_source,
+        "numerator_source_reference": gap.numerator_source_reference,
         "follow_up_due_at": gap.follow_up_due_at,
         "member_alias": member.alias,
         "dependent_alias": dependent.alias if dependent else None,
@@ -127,6 +141,46 @@ async def update_status(
     )
     await db.commit()
     return {"id": gap.id, "status": gap.status}
+
+
+@router.post("/{gap_id}/confirm-numerator")
+async def confirm_numerator(
+    gap_id: str,
+    body: NumeratorConfirm,
+    request: Request,
+    staff: StaffUser = Depends(require_role(*_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upgrade a numerator from self-report to claims-confirmed once staff
+    have matched it against a claim or encounter — the strongest evidence
+    this platform can attach to a gap short of a real claims-feed pipeline."""
+    gap = await db.get(CareGap, gap_id)
+    if gap is None or gap.tenant_id != staff.tenant_id:
+        raise HTTPException(404, "Not found")
+    if not body.reference.strip():
+        raise HTTPException(422, "A claim/encounter reference is required")
+
+    gap.numerator_met = True
+    gap.numerator_source = NumeratorSource.claims_confirmed.value
+    gap.numerator_source_reference = body.reference.strip()
+    if gap.status not in (GapStatus.closed.value, GapStatus.excluded.value):
+        gap.status = GapStatus.completed.value
+        gap.closed_at = datetime.utcnow()
+        gap.closure_reason = "numerator_met_claims_confirmed"
+
+    await log_action(
+        db,
+        actor_type="staff",
+        actor_id=staff.id,
+        action="numerator_confirmed_claims",
+        resource_type="care_gap",
+        resource_id=gap.id,
+        tenant_id=staff.tenant_id,
+        ip_address=client_ip(request),
+        metadata={"reference": body.reference.strip()},
+    )
+    await db.commit()
+    return {"id": gap.id, "status": gap.status, "numerator_source": gap.numerator_source}
 
 
 @router.post("/{gap_id}/notes")

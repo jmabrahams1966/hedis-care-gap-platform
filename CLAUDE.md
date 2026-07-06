@@ -44,9 +44,10 @@ their data onto an adult `Member` row.
 ## Current status
 
 - **Backend**: FastAPI + async SQLAlchemy. Fully working locally (SQLite,
-  dev_mode). 71 passing tests (`backend/tests/`). Alembic wired up
-  (`backend/migrations/`) with three migrations generated (initial schema,
-  `Member.conditions`, then the `Dependent` table + `CareGap.dependent_id`).
+  dev_mode). 76 passing tests (`backend/tests/`). Alembic wired up
+  (`backend/migrations/`) with four migrations generated (initial schema,
+  `Member.conditions`, the `Dependent` table + `CareGap.dependent_id`, then
+  `CareGap.numerator_source`/`numerator_source_reference`).
 - **Frontend**: React + TS + Vite. Redesigned UI (design system, shared nav,
   step indicators) as of the last commit. Verified in-browser across every
   page/role at desktop + mobile widths.
@@ -65,6 +66,18 @@ their data onto an adult `Member` row.
   `aws pinpoint-sms-voice-v2` call after `terraform apply` (see
   `docs/DEPLOYMENT.md` §2 step 4 — deliberately not Terraform-managed, see
   the comment in `infra/modules/messaging/main.tf`).
+- **Numerator provenance**: `CareGap.numerator_source` (`unconfirmed` |
+  `self_report` | `claims_confirmed`) tracks *how* a numerator was met, not
+  just whether it was. Staff can upgrade a case from the case detail page
+  ("Confirm via claims", requires a claim/encounter reference) —
+  `POST /api/care-gaps/{id}/confirm-numerator`. This is a manual per-case
+  action, not a claims-feed pipeline, but it's a real, cheap step toward
+  distinguishing self-report from confirmed evidence in HEDIS reporting.
+  74 backend tests passing (see below), plus a real browser check of the
+  confirm flow that caught and fixed a pre-existing bug: `CaseDetail.tsx`'s
+  `isClosed` check didn't include `status === "completed"`, so a
+  self-report-completed gap kept showing "Send outreach/Mark closed/Exclude"
+  buttons after it was already done.
 
 ## Possible first partner: St. Vincent's / USFHP
 
@@ -210,9 +223,12 @@ a permissions/quota issue in the AWS account, not a bug in `infra/`.
 - Fix `CareGap.period` for BCS/COL/CIS/WCV's actual lookback windows
   (multi-year or non-calendar, not calendar-year — and COL's varies by
   screening modality)
-- Claims-based (not self-report) numerator confirmation for BCS, COL, CBP,
-  CDC, CIS, WCV — every measure's numerator is currently self-report or a
-  self-reported clinical value, none are claims/encounter-confirmed
+- Claims-based numerator confirmation for BCS, COL, CBP, CDC, CIS, WCV is
+  still manual, per-case (`CareGap.numerator_source`, "Confirm via claims" in
+  the case detail UI) — there's no automated claims-feed reconciliation
+  pipeline that upgrades numerators in bulk. `GET /api/reports/hedis` also
+  doesn't yet break the numerator down by source (self-report vs.
+  claims-confirmed) — see `docs/HEDIS_COMPLIANCE.md` §9.
 - CIS/WCV are self-report proxies only — real numerator credit needs
   immunization-registry or claims data neither module has access to
 - WCV only covers ages 3-17 of HEDIS's real 0-21 eligible population (no
@@ -241,8 +257,9 @@ backend/app/outreach_service.py   Shared outreach-send logic
 backend/app/scripts/run_outreach_cron.py   Scheduled batch job entrypoint
 backend/app/notifications/sns_verify.py   AWS SNS signature verification (inbound SMS webhook)
 backend/app/routers/webhooks.py   POST /api/webhooks/sms-inbound — STOP/START handling
+backend/app/routers/care_gaps.py::confirm_numerator   POST .../confirm-numerator — self_report -> claims_confirmed
 backend/migrations/           Alembic — run `alembic upgrade head` for prod schema changes
-backend/tests/                pytest suite, 71 tests, run with pytest.ini config
+backend/tests/                pytest suite, 76 tests, run with pytest.ini config
 frontend/src/components/      Shared AppNav, StepIndicator
 frontend/src/styles/theme.css Design tokens
 infra/                        Terraform — validated, not applied

@@ -112,6 +112,10 @@ guardian/dependent flow, exclusions, and the HEDIS report.
 `tests/test_webhooks.py` does the same for the inbound SMS webhook: a signed
 STOP/START notification through the real HTTP path updates `Member.consent_sms`
 and writes an audit log entry, and unsigned/forged envelopes are rejected.
+`tests/test_numerator_source.py` covers the self-report → claims-confirmed
+numerator upgrade (`POST /api/care-gaps/{id}/confirm-numerator`): the
+reference is required, a claims-confirmed numerator isn't undone by a later
+contradicting self-report, and staff can't confirm a gap outside their tenant.
 
 **Frontend**
 ```bash

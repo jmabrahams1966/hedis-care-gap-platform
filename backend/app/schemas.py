@@ -129,6 +129,14 @@ class GapStatusUpdate(BaseModel):
     reason: str = ""
 
 
+class NumeratorConfirm(BaseModel):
+    """Staff action recording a claims/encounter match for a self-reported
+    numerator — the `reference` is what a HEDIS auditor will ask for (claim ID,
+    encounter number, or whatever your claims system uses to look it up)."""
+
+    reference: str
+
+
 class CareGapOut(BaseModel):
     id: str
     measure_code: str

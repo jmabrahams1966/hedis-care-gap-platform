@@ -57,12 +57,21 @@ interface CaseDetailResponse {
   measure_code: string;
   status: string;
   safety_flag: boolean;
+  numerator_met: boolean;
+  numerator_source: string;
+  numerator_source_reference: string;
   follow_up_due_at: string | null;
   member_alias: string;
   dependent_alias: string | null;
   submissions: Submission[];
   notes: Note[];
 }
+
+const NUMERATOR_SOURCE_LABEL: Record<string, string> = {
+  unconfirmed: "Not yet met",
+  self_report: "Self-reported",
+  claims_confirmed: "Claims confirmed",
+};
 
 const SEVERITY_BADGE: Record<string, string> = {
   minimal: "done",
@@ -113,6 +122,16 @@ export default function CaseDetail() {
     if (reason && reason.trim()) updateStatus("excluded", reason.trim());
   }
 
+  async function confirmNumerator() {
+    if (!gapId) return;
+    const reference = window.prompt(
+      "Claim or encounter reference confirming this numerator (required for your HEDIS auditor):"
+    );
+    if (!reference || !reference.trim()) return;
+    await api.post(`/api/care-gaps/${gapId}/confirm-numerator`, { reference: reference.trim() }, staff?.token);
+    load();
+  }
+
   async function sendOutreach() {
     if (!gapId) return;
     setSendingOutreach(true);
@@ -132,7 +151,7 @@ export default function CaseDetail() {
     );
   }
 
-  const isClosed = data.status === "closed" || data.status === "excluded";
+  const isClosed = data.status === "closed" || data.status === "excluded" || data.status === "completed";
 
   return (
     <>
@@ -165,19 +184,38 @@ export default function CaseDetail() {
             <strong>Follow-up due:</strong> {new Date(data.follow_up_due_at).toLocaleString()}
           </p>
         )}
-        {!isClosed && (
-          <div className="stack">
-            <button className="btn secondary" onClick={sendOutreach} disabled={sendingOutreach}>
-              {sendingOutreach ? "Sending…" : "Send outreach"}
+        <p>
+          <strong>Numerator:</strong> {data.numerator_met ? "Met" : "Not met"} —{" "}
+          <span className={`badge ${data.numerator_source === "claims_confirmed" ? "done" : "open"}`}>
+            {NUMERATOR_SOURCE_LABEL[data.numerator_source] ?? data.numerator_source}
+          </span>
+          {data.numerator_source === "claims_confirmed" && data.numerator_source_reference && (
+            <span className="muted" style={{ fontSize: 13 }}>
+              {" "}
+              (ref: {data.numerator_source_reference})
+            </span>
+          )}
+        </p>
+        <div className="stack">
+          {!isClosed && (
+            <>
+              <button className="btn secondary" onClick={sendOutreach} disabled={sendingOutreach}>
+                {sendingOutreach ? "Sending…" : "Send outreach"}
+              </button>
+              <button className="btn" onClick={() => updateStatus("closed")}>
+                Mark closed
+              </button>
+              <button className="btn danger" onClick={excludeGap}>
+                Exclude
+              </button>
+            </>
+          )}
+          {data.numerator_source !== "claims_confirmed" && (
+            <button className="btn secondary" onClick={confirmNumerator}>
+              Confirm via claims
             </button>
-            <button className="btn" onClick={() => updateStatus("closed")}>
-              Mark closed
-            </button>
-            <button className="btn danger" onClick={excludeGap}>
-              Exclude
-            </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       <h3>Screening results</h3>

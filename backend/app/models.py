@@ -41,6 +41,12 @@ class OutreachStatus(str, enum.Enum):
     opted_out = "opted_out"
 
 
+class NumeratorSource(str, enum.Enum):
+    unconfirmed = "unconfirmed"
+    self_report = "self_report"
+    claims_confirmed = "claims_confirmed"
+
+
 class GapStatus(str, enum.Enum):
     open = "open"
     outreach_sent = "outreach_sent"
@@ -237,6 +243,13 @@ class CareGap(Base):
 
     status: Mapped[str] = mapped_column(String(32), default=GapStatus.open.value)
     numerator_met: Mapped[bool] = mapped_column(Boolean, default=False)
+    # "unconfirmed" | "self_report" | "claims_confirmed" — provenance of
+    # numerator_met, not just whether it's true. Every measure's numerator is
+    # self-report today (see docs/HEDIS_COMPLIANCE.md); claims_confirmed is
+    # set only via the staff confirm-numerator action, which requires a
+    # claim/encounter reference (numerator_source_reference).
+    numerator_source: Mapped[str] = mapped_column(String(32), default=NumeratorSource.unconfirmed.value)
+    numerator_source_reference: Mapped[str] = mapped_column(String(255), default="")
     safety_flag: Mapped[bool] = mapped_column(Boolean, default=False)
 
     follow_up_due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

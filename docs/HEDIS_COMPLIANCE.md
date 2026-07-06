@@ -7,6 +7,27 @@ clinical or regulatory advice, and NCQA's HEDIS specifications are proprietary a
 licensed — the summaries below are not a substitute for the current official
 measure specification.
 
+## Numerator source: self-report vs. claims-confirmed
+
+Every measure's numerator below is flagged as self-report (or a self-reported
+clinical value) — none are claims/encounter-confirmed by default. `CareGap` now
+tracks *provenance*, not just whether the numerator is met:
+`numerator_source` is `self_report` when a member's answer set it,
+`claims_confirmed` when staff have upgraded it after matching a real
+claim/encounter, or `unconfirmed` otherwise. Care managers can do this
+per-case from the case detail page ("Confirm via claims"), which requires a
+claim/encounter reference (`POST /api/care-gaps/{id}/confirm-numerator`) and
+is audit-logged (`numerator_confirmed_claims`). A claims-confirmed numerator
+is treated as authoritative — a later, possibly-contradicting self-report
+cannot downgrade it (see `backend/app/routers/screenings.py`).
+
+This is a **manual, per-case upgrade path, not a claims-feed reconciliation
+pipeline.** It lets a care manager document real evidence when they have it
+(e.g. from a claims lookup done outside this platform), and lets your HEDIS
+reporting distinguish "self-report only" cases from confirmed ones when
+deciding what's safe to submit. It does not, by itself, make self-reported
+numerators below claims-grade — see each measure's caveat.
+
 ## 1. Measure implemented: Depression Screening and Follow-Up (DSF)
 
 | Instrument | License | Source | Placeholder wording? |
@@ -73,7 +94,9 @@ completion-confirmation + scheduling-assistance flow.
       is normally driven by **claims/encounter data**, not self-report. Decide
       whether self-report is acceptable as an interim/soft signal only, or
       whether numerator credit must be gated on a claims feed reconciliation
-      step before this measure's rate is reported anywhere official.
+      step before this measure's rate is reported anywhere official. Staff can
+      upgrade an individual case to `claims_confirmed` (see "Numerator source"
+      above) but that's a manual per-case action, not a feed.
 - [ ] `Member.sex` is currently a simple F/M/U field populated at roster
       ingestion — confirm the payer's eligibility feed is the right source of
       truth for this, not member self-report, for measure eligibility purposes
@@ -98,7 +121,8 @@ scheduling-assistance shape as BCS — no licensed instrument.
       and any exclusions (e.g. total colectomy, hospice)
 - [ ] **Numerator source** — self-report, same caveat as BCS: real HEDIS COL
       credit is normally claims/encounter-based. Decide whether self-report is
-      an interim signal only.
+      an interim signal only (staff can upgrade individual cases to
+      `claims_confirmed` — see "Numerator source" above).
 - [ ] `CareGap.period` is a calendar year — same mismatch as BCS, worse here
       given COL's multiple different lookback windows per modality.
 
@@ -124,7 +148,9 @@ with its own safety-flag concept (hypertensive crisis).
       value. This is meaningfully different from the BCS/COL self-report
       caveat — a home cuff reading and a clinical reading can differ, and using
       this for anything beyond member engagement/outreach triage needs
-      explicit clinical sign-off.
+      explicit clinical sign-off (staff can upgrade individual cases to
+      `claims_confirmed` — see "Numerator source" above — but that's not a
+      substitute for a real chart-confirmed reading).
 - [ ] Crisis threshold (systolic >= 180 or diastolic >= 120) — this is a widely
       used hypertensive-crisis threshold, but confirm the exact wording/values
       and the member-facing message (`ScreeningFlow.tsx`'s `BloodPressureFlow`)
@@ -157,7 +183,9 @@ Implemented in `backend/app/measures/diabetes.py`. Condition-gated like CBP
       inverts — CDC's headline sub-measure is typically framed as "% with
       *poor* control >9.0", i.e. a measure you want a *low* rate on; confirm
       you're not accidentally reporting this inverted against the wrong
-      polarity when this feeds anywhere official).
+      polarity when this feeds anywhere official). Staff can upgrade
+      individual cases to `claims_confirmed` (see "Numerator source" above)
+      once a lab-confirmed result is matched.
 - [ ] Follow-up window (30 days) for both "not tested" and "poor control" —
       confirm against your care team's actual outreach SLA, and consider
       whether poor control should have a shorter window than "not yet tested"
@@ -180,7 +208,9 @@ the account holder (`Member`) who receives outreach and authenticates. See
       immunization registry or claims data. This module is a **self-report
       proxy only** ("are immunizations up to date?") — it cannot produce a
       real CIS rate on its own. Treat it as an engagement/outreach signal, not
-      a measure calculation, until real immunization data is integrated.
+      a measure calculation, until real immunization data is integrated
+      (staff can upgrade individual cases to `claims_confirmed` — see
+      "Numerator source" above — once matched against registry/claims data).
 - [ ] Guardian consent: confirm your consent/privacy language covers a
       guardian receiving outreach *about* their dependent, not just about
       themselves — this is a different consent scope than every other measure
@@ -199,7 +229,8 @@ same shape as CIS.
       not covered at all; don't assume this module's denominator matches the
       real WCV eligible population.
 - [ ] **Numerator source** — self-report, same caveat as BCS/COL/CIS: real
-      HEDIS credit is claims/encounter-based.
+      HEDIS credit is claims/encounter-based (staff can upgrade individual
+      cases to `claims_confirmed` — see "Numerator source" above).
 
 ## 8. Sign-off
 
@@ -229,6 +260,11 @@ same shape as CIS.
 - [ ] Fix `CareGap.period` to be measure-appropriate — calendar year works for
       DSF/CBP/CDC (annual measures) but **not** for BCS/COL/CIS/WCV, which use
       multi-year or non-calendar measurement windows
+- [ ] `GET /api/reports/hedis` doesn't yet break the numerator down by
+      `numerator_source` (self-report vs. claims-confirmed) — worth adding
+      before you submit a rate anywhere that cares about evidence strength,
+      since right now a 100% self-report numerator and a 100%
+      claims-confirmed one look identical in the report
 
 ## 10. Adding a new measure module
 
