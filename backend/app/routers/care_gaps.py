@@ -28,10 +28,12 @@ _ROLES = (StaffRole.care_manager.value, StaffRole.payer_admin.value, StaffRole.s
 @router.get("/queue")
 async def queue(
     status: str | None = None,
+    measure: str | None = None,
     staff: StaffUser = Depends(require_role(*_ROLES)),
     db: AsyncSession = Depends(get_db),
 ):
-    """De-identified triage queue, sorted safety-first then by follow-up urgency."""
+    """De-identified triage queue, sorted safety-first then by follow-up urgency.
+    Optional `measure` filter powers the Quality Overview dashboard drill-down."""
     stmt = (
         select(CareGap, Member.alias, Dependent.alias)
         .join(Member, Member.id == CareGap.member_id)
@@ -42,6 +44,8 @@ async def queue(
         stmt = stmt.where(CareGap.status == status)
     else:
         stmt = stmt.where(CareGap.status.notin_([GapStatus.closed.value, GapStatus.excluded.value]))
+    if measure:
+        stmt = stmt.where(CareGap.measure_code == measure)
 
     stmt = stmt.order_by(
         case((CareGap.safety_flag.is_(True), 0), else_=1),
