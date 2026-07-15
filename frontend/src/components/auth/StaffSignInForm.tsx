@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
 import { useSession } from "../../context/SessionContext";
+import { FEATURE_OVERVIEW } from "../../lib/features";
 
 interface LoginResponse {
   token?: string;
@@ -30,7 +31,10 @@ export default function StaffSignInForm() {
 
   function completeLogin(res: LoginResponse) {
     setStaff({ token: res.token!, role: res.role!, name: res.name!, tenantId: res.tenant_id ?? null });
-    navigate(res.role === "super_admin" ? "/superadmin" : "/queue");
+    // super_admin picks a tenant first; payer_admin lands on the leadership
+    // dashboard (when live); care_manager goes straight to the work queue.
+    const payerHome = FEATURE_OVERVIEW ? "/overview" : "/queue";
+    navigate(res.role === "super_admin" ? "/superadmin" : res.role === "payer_admin" ? payerHome : "/queue");
   }
 
   async function onSubmitPassword(e: React.FormEvent) {

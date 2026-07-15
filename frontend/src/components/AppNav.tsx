@@ -1,5 +1,6 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useSession } from "../context/SessionContext";
+import { FEATURE_OVERVIEW } from "../lib/features";
 
 const ROLE_LABEL: Record<string, string> = {
   super_admin: "Super Admin",
@@ -18,6 +19,9 @@ export default function AppNav() {
   }
 
   const links: { to: string; label: string }[] = [];
+  if (FEATURE_OVERVIEW && (staff?.role === "payer_admin" || staff?.role === "super_admin")) {
+    links.push({ to: "/overview", label: "Overview" });
+  }
   if (staff?.role === "care_manager" || staff?.role === "payer_admin" || staff?.role === "super_admin") {
     links.push({ to: "/queue", label: "Care Gap Queue" });
   }

@@ -495,3 +495,141 @@ tbody tr:last-child td {
     transform: rotate(360deg);
   }
 }
+
+/* --- Quality Overview dashboard (Feature A) --- */
+
+.overview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.period-select {
+  display: flex;
+  align-items: center;
+}
+.period-select select {
+  width: auto;
+  margin-bottom: 0;
+}
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 0;
+}
+.kpi__label {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-faint);
+}
+.kpi__value {
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--text);
+}
+.kpi__sub {
+  font-size: 13px;
+}
+.kpi--alert {
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+}
+.kpi--alert .kpi__value {
+  color: var(--danger);
+}
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+.overview-grid .card,
+.overview-grid .safety-card {
+  margin-bottom: 0;
+}
+
+.card__title {
+  font-size: 16px;
+  margin: 0 0 12px;
+}
+
+th.num,
+td.num {
+  text-align: right;
+}
+
+.rate-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 110px;
+}
+.rate-bar {
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+.rate-bar__fill {
+  height: 100%;
+  background: var(--primary-500);
+  border-radius: 999px;
+}
+.source-split {
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.worklist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.worklist__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--danger-border);
+  text-decoration: none;
+  color: var(--text);
+}
+.worklist li:last-child .worklist__row {
+  border-bottom: none;
+}
+.worklist__measure {
+  font-size: 14px;
+  font-weight: 600;
+}
+.worklist__badges {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 860px) {
+  .kpi-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .overview-grid {
+    grid-template-columns: 1fr;
+  }
+}

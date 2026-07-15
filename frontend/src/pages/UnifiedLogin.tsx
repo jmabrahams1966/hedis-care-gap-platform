@@ -4,6 +4,7 @@ import { useSession } from "../context/SessionContext";
 import RoleSelector, { type LoginRole } from "../components/auth/RoleSelector";
 import MemberSignInForm from "../components/auth/MemberSignInForm";
 import StaffSignInForm from "../components/auth/StaffSignInForm";
+import { FEATURE_OVERVIEW } from "../lib/features";
 
 /**
  * Single-screen sign-in. A role selector (Member / Nurse Manager / Admin) swaps the
@@ -15,7 +16,11 @@ export default function UnifiedLogin() {
   const [role, setRole] = useState<LoginRole>("member");
 
   // Already signed in? Send them to their home rather than showing the login.
-  if (staff) return <Navigate to={staff.role === "super_admin" ? "/superadmin" : "/queue"} replace />;
+  if (staff) {
+    const payerHome = FEATURE_OVERVIEW ? "/overview" : "/queue";
+    const home = staff.role === "super_admin" ? "/superadmin" : staff.role === "payer_admin" ? payerHome : "/queue";
+    return <Navigate to={home} replace />;
+  }
   if (member) return <Navigate to="/screening" replace />;
 
   return (
