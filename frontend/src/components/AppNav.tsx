@@ -18,6 +18,9 @@ export default function AppNav() {
   }
 
   const links: { to: string; label: string }[] = [];
+  if (staff?.role === "payer_admin" || staff?.role === "super_admin") {
+    links.push({ to: "/overview", label: "Overview" });
+  }
   if (staff?.role === "care_manager" || staff?.role === "payer_admin" || staff?.role === "super_admin") {
     links.push({ to: "/queue", label: "Care Gap Queue" });
   }

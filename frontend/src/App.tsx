@@ -4,6 +4,7 @@ import AppNav from "./components/AppNav";
 import UnifiedLogin from "./pages/UnifiedLogin";
 import Verify from "./pages/member/Verify";
 import ScreeningFlow from "./pages/member/ScreeningFlow";
+import Overview from "./pages/care-manager/Overview";
 import Queue from "./pages/care-manager/Queue";
 import CaseDetail from "./pages/care-manager/CaseDetail";
 import TenantConfig from "./pages/admin/TenantConfig";
@@ -44,6 +45,14 @@ export default function App() {
           <RequireMember>
             <ScreeningFlow />
           </RequireMember>
+        }
+      />
+      <Route
+        path="/overview"
+        element={
+          <StaffPage wide>
+            <Overview />
+          </StaffPage>
         }
       />
       <Route

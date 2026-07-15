@@ -30,7 +30,9 @@ export default function StaffSignInForm() {
 
   function completeLogin(res: LoginResponse) {
     setStaff({ token: res.token!, role: res.role!, name: res.name!, tenantId: res.tenant_id ?? null });
-    navigate(res.role === "super_admin" ? "/superadmin" : "/queue");
+    // super_admin picks a tenant first; payer_admin lands on the leadership
+    // dashboard; care_manager goes straight to the work queue.
+    navigate(res.role === "super_admin" ? "/superadmin" : res.role === "payer_admin" ? "/overview" : "/queue");
   }
 
   async function onSubmitPassword(e: React.FormEvent) {

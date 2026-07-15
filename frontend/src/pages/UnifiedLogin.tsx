@@ -15,7 +15,13 @@ export default function UnifiedLogin() {
   const [role, setRole] = useState<LoginRole>("member");
 
   // Already signed in? Send them to their home rather than showing the login.
-  if (staff) return <Navigate to={staff.role === "super_admin" ? "/superadmin" : "/queue"} replace />;
+  if (staff)
+    return (
+      <Navigate
+        to={staff.role === "super_admin" ? "/superadmin" : staff.role === "payer_admin" ? "/overview" : "/queue"}
+        replace
+      />
+    );
   if (member) return <Navigate to="/screening" replace />;
 
   return (

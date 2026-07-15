@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useSession } from "../../context/SessionContext";
 import { api } from "../../lib/api";
 import { MEASURE_LABELS } from "../../data/measures";
@@ -33,16 +33,22 @@ function statusBadge(gap: GapRow) {
 
 export default function Queue() {
   const { staff } = useSession();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const measure = searchParams.get("measure"); // set by the Overview drill-down
   const [gaps, setGaps] = useState<GapRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["key"]>("all");
 
   useEffect(() => {
+    setLoading(true);
+    const path = measure
+      ? `/api/care-gaps/queue?measure=${encodeURIComponent(measure)}`
+      : "/api/care-gaps/queue";
     api
-      .get<GapRow[]>("/api/care-gaps/queue", staff?.token)
+      .get<GapRow[]>(path, staff?.token)
       .then(setGaps)
       .finally(() => setLoading(false));
-  }, [staff]);
+  }, [staff, measure]);
 
   const filtered = useMemo(() => {
     if (filter === "all") return gaps;
@@ -58,6 +64,23 @@ export default function Queue() {
         <h1>Care Gap Queue</h1>
         <p>De-identified triage queue, sorted safety-first.</p>
       </div>
+
+      {measure && (
+        <div className="info-card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>
+            Filtered to <strong>{MEASURE_LABELS[measure] ?? measure}</strong>
+          </span>
+          <button
+            className="btn secondary sm"
+            onClick={() => {
+              searchParams.delete("measure");
+              setSearchParams(searchParams, { replace: true });
+            }}
+          >
+            Clear filter
+          </button>
+        </div>
+      )}
 
       {safetyCount > 0 && (
         <div className="safety-card">
