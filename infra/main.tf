@@ -58,6 +58,7 @@ module "ecs" {
   task_cpu                     = var.task_cpu
   task_memory                  = var.task_memory
   desired_count                = var.desired_count
+  audit_bucket_arn             = module.audit.bucket_arn
   certificate_arn               = module.dns.api_certificate_arn
   zone_id                       = module.dns.zone_id
   api_fqdn                      = "${var.api_subdomain}.${var.domain_name}"
@@ -76,6 +77,7 @@ module "ecs" {
     SMS_ORIGINATION_NUMBER   = var.sms_origination_phone
     SMS_CONFIGURATION_SET    = module.messaging.configuration_set_name
     KMS_KEY_ARN              = module.secrets.kms_key_arn
+    AUDIT_ARCHIVE_BUCKET     = module.audit.bucket_name
   }
 }
 
@@ -85,10 +87,23 @@ module "messaging" {
   api_fqdn     = "${var.api_subdomain}.${var.domain_name}"
 }
 
+module "waf" {
+  source       = "./modules/waf"
+  project_name = var.project_name
+  alb_arn      = module.ecs.alb_arn
+}
+
+module "audit" {
+  source       = "./modules/audit"
+  project_name = var.project_name
+  kms_key_arn  = module.secrets.kms_key_arn
+}
+
 module "frontend" {
   source          = "./modules/frontend"
   project_name    = var.project_name
   app_fqdn        = "${var.app_subdomain}.${var.domain_name}"
+  api_fqdn        = "${var.api_subdomain}.${var.domain_name}"
   certificate_arn = module.dns.app_certificate_arn
   zone_id         = module.dns.zone_id
 }

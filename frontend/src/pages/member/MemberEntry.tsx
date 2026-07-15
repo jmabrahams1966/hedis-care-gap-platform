@@ -2,8 +2,12 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
 
+type Mode = "id" | "phone";
+
 export default function MemberEntry() {
+  const [mode, setMode] = useState<Mode>("id");
   const [memberId, setMemberId] = useState("");
+  const [phone, setPhone] = useState("");
   const [dob, setDob] = useState("");
   const [sent, setSent] = useState(false);
   const [devToken, setDevToken] = useState<string | null>(null);
@@ -16,10 +20,11 @@ export default function MemberEntry() {
     setError("");
     setLoading(true);
     try {
-      const res = await api.post<{ sent: boolean; dev_token?: string }>("/api/auth/member/magic", {
-        external_member_id: memberId,
-        date_of_birth: dob,
-      });
+      const [path, payload] =
+        mode === "id"
+          ? ["/api/auth/member/magic", { external_member_id: memberId, date_of_birth: dob }]
+          : ["/api/auth/member/magic-by-phone", { phone, date_of_birth: dob }];
+      const res = await api.post<{ sent: boolean; dev_token?: string }>(path as string, payload);
       setSent(true);
       if (res.dev_token) setDevToken(res.dev_token);
     } catch (err) {
@@ -36,7 +41,8 @@ export default function MemberEntry() {
           <div style={{ fontSize: 32, marginBottom: 8 }}>✓</div>
           <h2>Check your phone or email</h2>
           <p className="muted">
-            If we found a match, a secure one-time link was just sent to you. It expires in 30 minutes.
+            If we found a match, a secure one-time link was just sent to you. It's single-use — request a new one
+            here anytime if it expires.
           </p>
           {devToken && (
             <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px dashed var(--border)" }}>
@@ -54,14 +60,61 @@ export default function MemberEntry() {
   return (
     <div className="app-shell" style={{ paddingTop: 64 }}>
       <h2>Start your check-in</h2>
-      <p className="muted">Enter the details from your health plan card to get a secure link.</p>
+      <p className="muted">
+        Easiest way in: tap the link we texted or emailed you. Or enter your details here to get a fresh link.
+      </p>
+
+      <div className="stack" style={{ marginBottom: 12, gap: 8 }}>
+        <button
+          type="button"
+          className={mode === "id" ? "btn sm" : "btn secondary sm"}
+          onClick={() => setMode("id")}
+        >
+          Use member ID
+        </button>
+        <button
+          type="button"
+          className={mode === "phone" ? "btn sm" : "btn secondary sm"}
+          onClick={() => setMode("phone")}
+        >
+          Use phone number
+        </button>
+      </div>
+
       <form className="card" onSubmit={onSubmit}>
         {error && <p className="error-text">{error}</p>}
-        <label htmlFor="memberId">Member ID</label>
-        <input id="memberId" value={memberId} onChange={(e) => setMemberId(e.target.value)} required />
+        {mode === "id" ? (
+          <>
+            <label htmlFor="memberId">Member ID</label>
+            <input
+              id="memberId"
+              value={memberId}
+              onChange={(e) => setMemberId(e.target.value)}
+              placeholder="From your health plan card"
+              required
+            />
+          </>
+        ) : (
+          <>
+            <label htmlFor="phone">Phone number</label>
+            <input
+              id="phone"
+              type="tel"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="(555) 123-4567"
+              required
+            />
+          </>
+        )}
         <label htmlFor="dob">Date of birth</label>
         <input id="dob" type="date" value={dob} onChange={(e) => setDob(e.target.value)} required />
-        <button className="btn" type="submit" disabled={loading} style={{ width: "100%" }}>
+        <button
+          className="btn"
+          type="submit"
+          disabled={loading || (mode === "id" ? !memberId : !phone) || !dob}
+          style={{ width: "100%" }}
+        >
           {loading ? "Sending…" : "Send me a link"}
         </button>
       </form>

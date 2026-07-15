@@ -31,6 +31,34 @@ class Measure(ABC):
     #: resulting CareGap has both member_id (guardian) and dependent_id set.
     subject_type: str = "member"
 
+    #: How the gap is *opened*. False (default) — a gap is opened up-front for
+    #: every demographically-eligible member by the gap-opening pass. True — the
+    #: gap is opened only when ingested data arrives (pharmacy fills for PDC,
+    #: delivery episodes for PPC), so `_open_care_gaps_for_member` skips it and a
+    #: measure-specific service opens it instead.
+    data_driven: bool = False
+
+    #: Whether a member can answer this measure via `evaluate_submission`. True
+    #: (default) — screening/self-report measures, incl. episode-opened ones like
+    #: PPC where the member still reports "yes I had my visit". False — the
+    #: numerator is *computed* from claims and there is no member-facing form
+    #: (PDC): such measures are hidden from the member's screening list and
+    #: reject submissions.
+    accepts_self_report: bool = True
+
+    #: Which outreach copy to send for this measure — a key into
+    #: app/notifications/templates.OUTREACH_TEMPLATES. Screening measures use the
+    #: generic check-in invite; PDC uses a refill reminder; PPC uses pre/postnatal
+    #: reminders.
+    outreach_template: str = "screening_invite"
+
+    #: Measure-specific HEDIS exclusion codes — a member carrying any of these
+    #: (as a MemberExclusion) is removed from THIS measure's denominator (e.g.
+    #: a hysterectomy excludes cervical screening). Broad exclusions that remove
+    #: a member from every measure (hospice, deceased) live centrally in
+    #: app/measures/exclusions.py, not here.
+    exclusion_codes: frozenset[str] = frozenset()
+
     @abstractmethod
     def is_eligible(self, subject: Demographic, as_of: date) -> bool:
         """Whether this subject (a Member, or a Dependent for subject_type ==

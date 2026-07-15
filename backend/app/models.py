@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -15,6 +16,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from .crypto import EncryptedString
 from .db import Base
 
 
@@ -45,6 +47,14 @@ class NumeratorSource(str, enum.Enum):
     unconfirmed = "unconfirmed"
     self_report = "self_report"
     claims_confirmed = "claims_confirmed"
+
+
+class DrugClass(str, enum.Enum):
+    """Therapeutic classes tracked for PDC medication-adherence measures."""
+
+    diabetes = "diabetes"  # non-insulin diabetes medications (PDC-DR)
+    rasa = "rasa"  # RAS antagonists: ACEIs / ARBs / direct renin inhibitors (PDC-RASA)
+    statins = "statins"  # statin cholesterol medications (PDC-STA)
 
 
 class GapStatus(str, enum.Enum):
@@ -118,6 +128,15 @@ class StaffUser(Base):
     password_hash: Mapped[str] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(32))
     name: Mapped[str] = mapped_column(String(255), default="")
+    # Brute-force protection: consecutive failed logins, and a lock expiry after
+    # too many. Reset on any successful login.
+    failed_login_count: Mapped[int] = mapped_column(Integer, default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # TOTP multi-factor auth. `mfa_secret` is the base32 shared secret (set at
+    # enrollment); `mfa_enabled` flips true only once the user confirms a code,
+    # so a half-finished enrollment never blocks login.
+    mfa_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     tenant: Mapped["Tenant | None"] = relationship(back_populates="users")
@@ -133,13 +152,15 @@ class Member(Base):
     tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
     external_member_id: Mapped[str] = mapped_column(String(128), index=True)  # payer's member/subscriber ID
 
-    first_name: Mapped[str] = mapped_column(String(128))
-    last_name: Mapped[str] = mapped_column(String(128))
-    date_of_birth: Mapped[str] = mapped_column(String(10))  # YYYY-MM-DD
+    # PII encrypted at the field level (AES-256-SIV, see app/crypto.py). date_of_birth
+    # is deterministically encrypted so the magic-link identity lookup still works.
+    first_name: Mapped[str] = mapped_column(EncryptedString(512))
+    last_name: Mapped[str] = mapped_column(EncryptedString(512))
+    date_of_birth: Mapped[str] = mapped_column(EncryptedString(512))  # YYYY-MM-DD (encrypted)
     sex: Mapped[str] = mapped_column(String(1), default="U")  # "F" | "M" | "U" — used by sex-specific measure eligibility (e.g. BCS)
     conditions: Mapped[list] = mapped_column(JSON, default=list)  # e.g. ["hypertension", "diabetes"] — condition-gated measure eligibility
-    phone: Mapped[str] = mapped_column(String(32), default="")
-    email: Mapped[str] = mapped_column(String(255), default="")
+    phone: Mapped[str] = mapped_column(EncryptedString(512), default="")
+    email: Mapped[str] = mapped_column(EncryptedString(512), default="")
     preferred_channel: Mapped[str] = mapped_column(String(16), default=Channel.sms.value)
     preferred_language: Mapped[str] = mapped_column(String(8), default="en")
 
@@ -153,6 +174,15 @@ class Member(Base):
     tenant: Mapped["Tenant"] = relationship(back_populates="members")
     care_gaps: Mapped[list["CareGap"]] = relationship(back_populates="member", cascade="all, delete-orphan")
     dependents: Mapped[list["Dependent"]] = relationship(back_populates="guardian", cascade="all, delete-orphan")
+    medication_fills: Mapped[list["MedicationFill"]] = relationship(
+        back_populates="member", cascade="all, delete-orphan"
+    )
+    pregnancy_episodes: Mapped[list["PregnancyEpisode"]] = relationship(
+        back_populates="member", cascade="all, delete-orphan"
+    )
+    exclusions: Mapped[list["MemberExclusion"]] = relationship(
+        back_populates="member", cascade="all, delete-orphan"
+    )
 
 
 class Dependent(Base):
@@ -174,9 +204,10 @@ class Dependent(Base):
     guardian_member_id: Mapped[str] = mapped_column(ForeignKey("members.id"), index=True)
     external_dependent_id: Mapped[str] = mapped_column(String(128), index=True)
 
-    first_name: Mapped[str] = mapped_column(String(128))
-    last_name: Mapped[str] = mapped_column(String(128))
-    date_of_birth: Mapped[str] = mapped_column(String(10))  # YYYY-MM-DD
+    # PII encrypted at the field level (see app/crypto.py).
+    first_name: Mapped[str] = mapped_column(EncryptedString(512))
+    last_name: Mapped[str] = mapped_column(EncryptedString(512))
+    date_of_birth: Mapped[str] = mapped_column(EncryptedString(512))  # YYYY-MM-DD (encrypted)
     sex: Mapped[str] = mapped_column(String(1), default="U")
 
     alias: Mapped[str] = mapped_column(String(32), default="")  # de-identified label shown to care managers
@@ -184,6 +215,105 @@ class Dependent(Base):
 
     guardian: Mapped["Member"] = relationship(back_populates="dependents")
     care_gaps: Mapped[list["CareGap"]] = relationship(back_populates="dependent", cascade="all, delete-orphan")
+
+
+class MedicationFill(Base):
+    """A pharmacy dispensing event for a member, used to compute Proportion of
+    Days Covered (PDC) medication-adherence measures. Ingested from the payer's
+    pharmacy-claims feed — there is no self-report path, since a fill is claims
+    evidence by nature, which is why PDC numerators derived from these rows are
+    recorded as `claims_confirmed`.
+    """
+
+    __tablename__ = "medication_fills"
+    __table_args__ = (
+        # Idempotent re-ingestion when the feed carries a claim id. Partial unique
+        # index (not a plain UniqueConstraint) so rows without a claim id — a NULL,
+        # not "" — don't collide with each other, the same reason CareGap uses
+        # partial indexes for its nullable dependent_id.
+        Index(
+            "uq_medication_fill_claim",
+            "tenant_id",
+            "external_claim_id",
+            unique=True,
+            sqlite_where=text("external_claim_id IS NOT NULL"),
+            postgresql_where=text("external_claim_id IS NOT NULL"),
+        ),
+        Index("ix_medication_fills_member_class", "member_id", "drug_class"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    member_id: Mapped[str] = mapped_column(ForeignKey("members.id"), index=True)
+    drug_class: Mapped[str] = mapped_column(String(32))  # DrugClass value
+    ndc: Mapped[str] = mapped_column(String(16), default="")  # National Drug Code, optional
+    drug_label: Mapped[str] = mapped_column(String(128), default="")  # human-readable, optional
+    fill_date: Mapped[str] = mapped_column(String(10))  # YYYY-MM-DD, dispensing date
+    days_supply: Mapped[int] = mapped_column(Integer)
+    external_claim_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    source: Mapped[str] = mapped_column(String(32), default="pharmacy_claim")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    member: Mapped["Member"] = relationship(back_populates="medication_fills")
+
+
+class PregnancyEpisode(Base):
+    """A delivery (live-birth) episode for a member, the anchor for the Prenatal
+    and Postpartum Care (PPC) measures. PPC is scored relative to the delivery
+    date, not the calendar year, so its care gaps hang off an episode rather than
+    the usual (member × measure × period) grain. Ingested from the payer's
+    claims feed; `estimated_due_date` lets prenatal outreach be prospective when
+    the pregnancy is known before delivery.
+    """
+
+    __tablename__ = "pregnancy_episodes"
+    __table_args__ = (
+        Index(
+            "uq_pregnancy_episode_external",
+            "tenant_id",
+            "external_episode_id",
+            unique=True,
+            sqlite_where=text("external_episode_id IS NOT NULL"),
+            postgresql_where=text("external_episode_id IS NOT NULL"),
+        ),
+        Index("ix_pregnancy_episodes_member", "member_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    member_id: Mapped[str] = mapped_column(ForeignKey("members.id"), index=True)
+    delivery_date: Mapped[str] = mapped_column(String(10))  # YYYY-MM-DD
+    estimated_due_date: Mapped[str] = mapped_column(String(10), default="")  # YYYY-MM-DD, optional
+    external_episode_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    source: Mapped[str] = mapped_column(String(32), default="claim")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    member: Mapped["Member"] = relationship(back_populates="pregnancy_episodes")
+
+
+class MemberExclusion(Base):
+    """A HEDIS exclusion event on file for a member — the clinical/enrollment
+    fact (hysterectomy, hospice, deceased, …) plus a `reference` an auditor can
+    check. Which measures each code removes from the denominator is policy that
+    lives in code (app/measures/exclusions.py + each Measure.exclusion_codes),
+    not here.
+    """
+
+    __tablename__ = "member_exclusions"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "member_id", "exclusion_code", name="uq_member_exclusion"),
+        Index("ix_member_exclusions_member", "member_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    member_id: Mapped[str] = mapped_column(ForeignKey("members.id"), index=True)
+    exclusion_code: Mapped[str] = mapped_column(String(64))
+    reference: Mapped[str] = mapped_column(String(255), default="")  # claim/encounter evidence
+    source: Mapped[str] = mapped_column(String(32), default="claim")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    member: Mapped["Member"] = relationship(back_populates="exclusions")
 
 
 class MagicToken(Base):
@@ -204,12 +334,17 @@ class CareGap(Base):
     """One row per (member or dependent) x measure x reporting period — the
     unit HEDIS reports on. `member_id` is always the account holder who
     receives outreach; `dependent_id` is set when the gap's actual subject is
-    their dependent (pediatric measures) rather than the member themselves.
+    their dependent (pediatric measures) rather than the member themselves;
+    `pregnancy_episode_id` is set for episode-scoped measures (PPC), where the
+    grain is the delivery, not the calendar period, so one member can hold two
+    PPC gaps for two deliveries in the same measurement year.
 
-    Two partial unique indexes (not one plain UniqueConstraint) because a
-    NULL dependent_id doesn't collide with another NULL under standard SQL
-    unique-constraint semantics — a plain UniqueConstraint here would silently
-    allow duplicate member-scoped gaps.
+    Three partial unique indexes (not plain UniqueConstraints) because a NULL
+    doesn't collide with another NULL under standard SQL unique semantics — a
+    plain constraint would silently allow duplicate gaps. Each index governs one
+    grain, and the conditions are mutually exclusive so a gap falls under exactly
+    one: plain member gaps (no dependent, no episode), dependent gaps, and
+    episode gaps.
     """
 
     __tablename__ = "care_gaps"
@@ -220,8 +355,8 @@ class CareGap(Base):
             "measure_code",
             "period",
             unique=True,
-            sqlite_where=text("dependent_id IS NULL"),
-            postgresql_where=text("dependent_id IS NULL"),
+            sqlite_where=text("dependent_id IS NULL AND pregnancy_episode_id IS NULL"),
+            postgresql_where=text("dependent_id IS NULL AND pregnancy_episode_id IS NULL"),
         ),
         Index(
             "uq_dependent_measure_period",
@@ -232,12 +367,25 @@ class CareGap(Base):
             sqlite_where=text("dependent_id IS NOT NULL"),
             postgresql_where=text("dependent_id IS NOT NULL"),
         ),
+        Index(
+            "uq_episode_measure",
+            "pregnancy_episode_id",
+            "measure_code",
+            unique=True,
+            sqlite_where=text("pregnancy_episode_id IS NOT NULL"),
+            postgresql_where=text("pregnancy_episode_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
     member_id: Mapped[str] = mapped_column(ForeignKey("members.id"), index=True)
     dependent_id: Mapped[str | None] = mapped_column(ForeignKey("dependents.id"), nullable=True, index=True)
+    # Set for episode-scoped measures (PPC) — the gap belongs to one delivery.
+    # The uq_episode_measure partial index covers lookups by this column.
+    pregnancy_episode_id: Mapped[str | None] = mapped_column(
+        ForeignKey("pregnancy_episodes.id"), nullable=True
+    )
     measure_code: Mapped[str] = mapped_column(ForeignKey("measures.code"), index=True)
     period: Mapped[str] = mapped_column(String(16))  # e.g. "2026"
 

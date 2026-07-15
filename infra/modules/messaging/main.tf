@@ -58,3 +58,10 @@ resource "aws_pinpointsmsvoicev2_configuration_set" "sms" {
   name                 = "${var.project_name}-sms"
   default_message_type = "TRANSACTIONAL"
 }
+
+# SES configuration set the backend names on every SendEmail
+# (SES_CONFIGURATION_SET env). Without it, SES returns
+# ConfigurationSetDoesNotExist and all email silently fails — so it must exist.
+resource "aws_sesv2_configuration_set" "email" {
+  configuration_set_name = var.project_name
+}

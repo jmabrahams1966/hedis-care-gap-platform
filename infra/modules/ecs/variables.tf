@@ -58,6 +58,11 @@ variable "kms_key_arn" {
   type = string
 }
 
+variable "audit_bucket_arn" {
+  description = "ARN of the WORM audit-archive S3 bucket the app appends to"
+  type        = string
+}
+
 variable "database_url_secret_arn" {
   description = "ARN of a plain-string secret holding the full asyncpg DATABASE_URL"
   type        = string

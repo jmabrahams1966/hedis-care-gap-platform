@@ -30,6 +30,18 @@ interface A1cScore {
   poor_control: boolean;
 }
 
+interface KedScore {
+  has_egfr: boolean;
+  has_uacr: boolean;
+  wants_scheduling_help: boolean;
+}
+
+interface PpcScore {
+  had_prenatal_visit?: boolean;
+  had_postpartum_visit?: boolean;
+  wants_scheduling_help?: boolean;
+}
+
 interface Submission {
   submitted_at: string;
   safety_flag: boolean;
@@ -37,11 +49,16 @@ interface Submission {
     phq9?: InstrumentScore;
     gad7?: InstrumentScore | null;
     bcs?: ScheduleAssistScore;
+    ccs?: ScheduleAssistScore;
     col?: ScheduleAssistScore;
+    eed?: ScheduleAssistScore;
     bp?: BpScore;
     a1c?: A1cScore;
+    ked?: KedScore;
     cis?: ScheduleAssistScore;
     wcv?: ScheduleAssistScore;
+    ppc_prenatal?: PpcScore;
+    ppc_postpartum?: PpcScore;
   };
 }
 
@@ -189,10 +206,10 @@ export default function CaseDetail() {
           <span className={`badge ${data.numerator_source === "claims_confirmed" ? "done" : "open"}`}>
             {NUMERATOR_SOURCE_LABEL[data.numerator_source] ?? data.numerator_source}
           </span>
-          {data.numerator_source === "claims_confirmed" && data.numerator_source_reference && (
+          {data.numerator_source_reference && (
             <span className="muted" style={{ fontSize: 13 }}>
               {" "}
-              (ref: {data.numerator_source_reference})
+              ({data.numerator_source_reference})
             </span>
           )}
         </p>
@@ -275,6 +292,40 @@ export default function CaseDetail() {
                 Well-child visit: {s.instrument_scores.wcv.has_completed ? "completed" : "not completed"}
                 {!s.instrument_scores.wcv.has_completed &&
                   (s.instrument_scores.wcv.wants_scheduling_help ? " — wants help" : " — declined help")}
+              </span>
+            )}
+            {s.instrument_scores.ccs && (
+              <span className={`badge ${s.instrument_scores.ccs.has_completed ? "done" : "follow-up"}`}>
+                Cervical screening: {s.instrument_scores.ccs.has_completed ? "completed" : "not completed"}
+                {!s.instrument_scores.ccs.has_completed &&
+                  (s.instrument_scores.ccs.wants_scheduling_help ? " — wants help" : " — declined help")}
+              </span>
+            )}
+            {s.instrument_scores.eed && (
+              <span className={`badge ${s.instrument_scores.eed.has_completed ? "done" : "follow-up"}`}>
+                Diabetic eye exam: {s.instrument_scores.eed.has_completed ? "completed" : "not completed"}
+                {!s.instrument_scores.eed.has_completed &&
+                  (s.instrument_scores.eed.wants_scheduling_help ? " — wants help" : " — declined help")}
+              </span>
+            )}
+            {s.instrument_scores.ked && (
+              <span
+                className={`badge ${s.instrument_scores.ked.has_egfr && s.instrument_scores.ked.has_uacr ? "done" : "follow-up"}`}
+              >
+                Kidney tests: eGFR {s.instrument_scores.ked.has_egfr ? "✓" : "✗"}, uACR{" "}
+                {s.instrument_scores.ked.has_uacr ? "✓" : "✗"}
+              </span>
+            )}
+            {s.instrument_scores.ppc_prenatal && (
+              <span className={`badge ${s.instrument_scores.ppc_prenatal.had_prenatal_visit ? "done" : "follow-up"}`}>
+                Prenatal visit: {s.instrument_scores.ppc_prenatal.had_prenatal_visit ? "yes" : "not reported"}
+              </span>
+            )}
+            {s.instrument_scores.ppc_postpartum && (
+              <span className={`badge ${s.instrument_scores.ppc_postpartum.had_postpartum_visit ? "done" : "follow-up"}`}>
+                Postpartum visit: {s.instrument_scores.ppc_postpartum.had_postpartum_visit ? "completed" : "not yet"}
+                {!s.instrument_scores.ppc_postpartum.had_postpartum_visit &&
+                  (s.instrument_scores.ppc_postpartum.wants_scheduling_help ? " — wants help" : " — declined help")}
               </span>
             )}
           </div>

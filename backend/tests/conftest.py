@@ -14,6 +14,12 @@ from httpx import ASGITransport, AsyncClient
 from app.db import SessionLocal, engine, init_db
 from app.main import app
 from app.seed import ensure_measure_catalog
+from app.security import pwd_context
+
+# Tests do a lot of password hashing/verifying (logins, lockout, MFA flows).
+# Production bcrypt cost is deliberately slow; drop it to the minimum in tests so
+# the suite isn't dominated by KDF time. Affects the test harness only, never prod.
+pwd_context.update(bcrypt__rounds=4)
 
 
 @pytest_asyncio.fixture

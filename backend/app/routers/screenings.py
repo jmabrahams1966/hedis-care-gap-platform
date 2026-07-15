@@ -7,11 +7,38 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..audit import log_action
 from ..db import get_db
 from ..deps import client_ip, get_current_member
-from ..measures import get_measure
+from ..measures import REGISTRY, get_measure
 from ..models import CareGap, Dependent, GapStatus, Member, NumeratorSource, ScreeningSubmission
 from ..schemas import ScreeningSubmit
 
 router = APIRouter(prefix="/api/screenings", tags=["screenings"])
+
+# Order the member's check-in list by clinical time-sensitivity: time-bound
+# maternity first, then chronic-condition measures that can surface an urgent
+# reading, then behavioral health, screenings, the diabetes bundle, and
+# pediatric. Anything unlisted sorts last. (A gap the outreach specifically
+# targeted is opened first by the frontend regardless of this order.)
+_SCREENING_PRIORITY = [
+    "ppc_postpartum",
+    "ppc_prenatal",
+    "blood_pressure",
+    "diabetes_a1c",
+    "mental_health",
+    "breast_cancer",
+    "cervical_cancer",
+    "colorectal_cancer",
+    "eye_exam",
+    "kidney_health",
+    "childhood_immunization",
+    "well_child_visits",
+]
+
+
+def _screening_priority(measure_code: str) -> int:
+    try:
+        return _SCREENING_PRIORITY.index(measure_code)
+    except ValueError:
+        return len(_SCREENING_PRIORITY)
 
 
 @router.get("/pending")
@@ -31,7 +58,15 @@ async def list_pending_screenings(
             CareGap.status.in_([GapStatus.open.value, GapStatus.outreach_sent.value]),
         )
     )
-    rows = res.all()
+    pending = [
+        (gap, dependent)
+        for gap, dependent in res.all()
+        # Measures with no member-facing form (PDC — numerator computed from
+        # claims) never belong in a member's "screenings to complete" list.
+        # Episode-opened measures that DO accept self-report (PPC) still appear.
+        if getattr(REGISTRY.get(gap.measure_code), "accepts_self_report", True)
+    ]
+    pending.sort(key=lambda row: _screening_priority(row[0].measure_code))
     return [
         {
             "care_gap_id": gap.id,
@@ -39,7 +74,7 @@ async def list_pending_screenings(
             "period": gap.period,
             "dependent_first_name": dependent.first_name if dependent else None,
         }
-        for gap, dependent in rows
+        for gap, dependent in pending
     ]
 
 
@@ -57,6 +92,11 @@ async def submit_screening(
         raise HTTPException(409, "This care gap is already closed")
 
     measure = get_measure(gap.measure_code)
+    if not measure.accepts_self_report:
+        raise HTTPException(
+            422,
+            "This measure's numerator is computed from pharmacy/claims data, not a member self-report",
+        )
     try:
         evaluation = measure.evaluate_submission(body.responses)
     except (ValueError, KeyError) as e:

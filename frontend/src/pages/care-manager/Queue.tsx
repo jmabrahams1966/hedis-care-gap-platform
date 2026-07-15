@@ -11,6 +11,7 @@ interface GapRow {
   status: string;
   safety_flag: boolean;
   numerator_met: boolean;
+  numerator_source: string;
   follow_up_due_at: string | null;
   member_alias: string;
   dependent_alias: string | null;
@@ -110,7 +111,16 @@ export default function Queue() {
                     )}
                   </td>
                   <td>{MEASURE_LABELS[g.measure_code] ?? g.measure_code}</td>
-                  <td>{statusBadge(g)}</td>
+                  <td>
+                    <div className="stack" style={{ alignItems: "center", gap: 6 }}>
+                      {statusBadge(g)}
+                      {g.numerator_source === "claims_confirmed" && (
+                        <span className="badge done" style={{ fontSize: 11 }}>
+                          claims ✓
+                        </span>
+                      )}
+                    </div>
+                  </td>
                   <td style={{ textAlign: "right" }}>
                     <Link to={`/queue/${g.id}`} className="btn secondary sm">
                       View

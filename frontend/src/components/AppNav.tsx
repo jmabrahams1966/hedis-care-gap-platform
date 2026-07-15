@@ -27,6 +27,9 @@ export default function AppNav() {
   if (staff?.role === "super_admin") {
     links.push({ to: "/superadmin", label: "Tenants" });
   }
+  if (staff) {
+    links.push({ to: "/security", label: "Security" });
+  }
 
   return (
     <nav className="top-nav">

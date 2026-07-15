@@ -11,9 +11,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_db
 from ..deps import require_role
 from ..measures import REGISTRY
-from ..models import CareGap, Dependent, Member, StaffRole, StaffUser, TenantMeasureConfig
 from ..measures.base import default_period
-from ..schemas import DependentCreate, DependentOut, MemberCreate, MemberOut
+from ..measures.exclusions import (
+    all_known_exclusion_codes,
+    apply_exclusions_for_member,
+    is_excluded,
+    member_exclusion_codes,
+)
+from ..models import CareGap, Dependent, Member, MemberExclusion, StaffRole, StaffUser, TenantMeasureConfig
+from ..schemas import (
+    DependentCreate,
+    DependentOut,
+    MemberCreate,
+    MemberExclusionCreate,
+    MemberOut,
+)
 
 router = APIRouter(prefix="/api/members", tags=["members"])
 
@@ -42,11 +54,18 @@ async def _open_care_gaps_for_member(db: AsyncSession, member: Member) -> None:
     dependent-measure subject."""
     configs = await _enabled_measure_configs(db, member.tenant_id)
     period = default_period()
+    exclusion_codes = await member_exclusion_codes(db, member.id)
     for config in configs:
         measure = REGISTRY.get(config.measure_code)
-        if measure is None or measure.subject_type != "member":
+        if measure is None or measure.subject_type != "member" or measure.data_driven:
+            # data_driven measures (PDC adherence) aren't opened from demographics —
+            # they're opened from ingested pharmacy fills (see pdc_service).
             continue
         if not measure.is_eligible(member, date.today()):
+            continue
+        if is_excluded(exclusion_codes, measure):
+            # A member with a qualifying HEDIS exclusion isn't in the denominator,
+            # so don't open a gap to chase.
             continue
         existing = (
             await db.execute(
@@ -279,6 +298,83 @@ async def bulk_create_members_csv(
         "errors": errors,
         "members": [MemberOut.model_validate(m) for m in created_members],
         "dependents": [DependentOut.model_validate(d) for d in created_dependents],
+    }
+
+
+@router.post("/exclusions/bulk")
+async def bulk_ingest_exclusions(
+    body: list[MemberExclusionCreate],
+    staff: StaffUser = Depends(require_role(StaffRole.payer_admin.value, StaffRole.super_admin.value)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Ingest HEDIS exclusion events from the payer's claims feed, then re-apply
+    exclusions so any affected open care gaps drop out of the denominator.
+    Unknown exclusion codes are reported as errors (an unrecognized code would
+    silently exclude nothing)."""
+    known = all_known_exclusion_codes()
+    members_by_external_id: dict[str, Member | None] = {}
+    affected: dict[str, Member] = {}
+    created = 0
+    errors: list[dict] = []
+
+    for index, item in enumerate(body):
+        if item.exclusion_code not in known:
+            errors.append(
+                {"index": index, "external_member_id": item.external_member_id,
+                 "error": f"Unknown exclusion_code '{item.exclusion_code}' (known: {sorted(known)})"}
+            )
+            continue
+
+        if item.external_member_id not in members_by_external_id:
+            members_by_external_id[item.external_member_id] = (
+                await db.execute(
+                    select(Member).where(
+                        Member.tenant_id == staff.tenant_id,
+                        Member.external_member_id == item.external_member_id,
+                    )
+                )
+            ).scalar_one_or_none()
+        member = members_by_external_id[item.external_member_id]
+        if member is None:
+            errors.append(
+                {"index": index, "external_member_id": item.external_member_id, "error": "Member not found for this tenant"}
+            )
+            continue
+
+        # Idempotent: one row per (member, code).
+        existing = (
+            await db.execute(
+                select(MemberExclusion).where(
+                    MemberExclusion.member_id == member.id,
+                    MemberExclusion.exclusion_code == item.exclusion_code,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            db.add(
+                MemberExclusion(
+                    tenant_id=staff.tenant_id,
+                    member_id=member.id,
+                    exclusion_code=item.exclusion_code,
+                    reference=item.reference,
+                    source=item.source,
+                )
+            )
+            created += 1
+        affected[member.id] = member
+
+    await db.flush()
+
+    gaps_excluded = 0
+    for member in affected.values():
+        gaps_excluded += await apply_exclusions_for_member(db, member)
+
+    await db.commit()
+    return {
+        "exclusions_created": created,
+        "members_affected": len(affected),
+        "gaps_excluded": gaps_excluded,
+        "errors": errors,
     }
 
 

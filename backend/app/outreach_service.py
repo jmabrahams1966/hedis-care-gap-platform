@@ -9,14 +9,12 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .config import settings
+from .measures import REGISTRY
 from .models import CareGap, GapStatus, MagicToken, Member, OutreachAttempt, OutreachStatus, Tenant
 from .notifications.email_service import send_email
 from .notifications.sms_service import send_sms
-from .notifications.templates import (
-    screening_invite_email_body,
-    screening_invite_email_subject,
-    screening_invite_sms,
-)
+from .notifications.templates import OUTREACH_TEMPLATES
 from .security import generate_magic_token, magic_token_expiry
 
 RETRY_CADENCE_DAYS = 7
@@ -27,36 +25,52 @@ async def send_to_member(db: AsyncSession, tenant: Tenant, member: Member, gap: 
     db.add(
         MagicToken(member_id=member.id, token_hash=token_hash, purpose="screening", expires_at=magic_token_expiry())
     )
-    link = f"https://app.example.com/verify?token={raw_token}"
+    # `focus` tells the check-in page which measure this outreach was about, so
+    # the member lands on that specific screen (not just the first in their list).
+    link = f"{settings.app_base_url}/verify?token={raw_token}&focus={gap.id}"
 
-    channel = "sms" if (member.preferred_channel == "sms" and member.consent_sms and member.phone) else "email"
-    if channel == "sms":
-        message_id = send_sms(member.phone, screening_invite_sms(tenant.name, link))
-    elif member.consent_email and member.email:
-        message_id = send_email(
-            member.email,
-            screening_invite_email_subject(tenant.name),
-            screening_invite_email_body(tenant.name, member.first_name, link),
-        )
-    else:
-        attempt = OutreachAttempt(
-            care_gap_id=gap.id,
-            member_id=member.id,
-            channel=member.preferred_channel,
-            template_code="screening_invite",
-            status=OutreachStatus.failed.value,
-            error="No consent on file for any contact channel",
-        )
-        db.add(attempt)
-        return attempt
+    # Pick outreach copy by the measure's template (screening invite / refill
+    # reminder / pre- or postnatal reminder). Falls back to the screening invite
+    # for anything unrecognized.
+    measure = REGISTRY.get(gap.measure_code)
+    template_code = getattr(measure, "outreach_template", "screening_invite")
+    tpl = OUTREACH_TEMPLATES.get(template_code, OUTREACH_TEMPLATES["screening_invite"])
+
+    # Best-effort delivery: try the member's preferred channel, fall back to email
+    # if SMS is unavailable/unconfigured, and never let a provider error crash the
+    # batch — record a failed attempt for the queue instead.
+    prefers_sms = member.preferred_channel == "sms" and member.consent_sms and bool(member.phone)
+    can_email = bool(member.consent_email and member.email)
+    channel, message_id, error = "", "", ""
+
+    if prefers_sms:
+        channel = "sms"
+        try:
+            message_id = send_sms(member.phone, tpl["sms"](tenant.name, link))
+        except Exception as e:  # noqa: BLE001 — delivery must not crash the batch
+            error = str(e)[:500]
+    if not message_id and can_email:
+        channel = "email"
+        try:
+            message_id = send_email(
+                member.email,
+                tpl["email_subject"](tenant.name),
+                tpl["email_body"](tenant.name, member.first_name, link),
+            )
+        except Exception as e:  # noqa: BLE001
+            error = str(e)[:500]
+    if not channel:
+        channel = member.preferred_channel
+        error = error or "No consent on file for any contact channel"
 
     attempt = OutreachAttempt(
         care_gap_id=gap.id,
         member_id=member.id,
         channel=channel,
-        template_code="screening_invite",
-        status=OutreachStatus.sent.value,
+        template_code=template_code,
+        status=OutreachStatus.sent.value if message_id else OutreachStatus.failed.value,
         provider_message_id=message_id,
+        error="" if message_id else (error or "delivery not confirmed"),
     )
     db.add(attempt)
     return attempt

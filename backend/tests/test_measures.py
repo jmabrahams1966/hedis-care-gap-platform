@@ -4,9 +4,12 @@ import pytest
 
 from app.measures.blood_pressure import blood_pressure_measure
 from app.measures.breast_cancer import breast_cancer_measure
+from app.measures.cervical_cancer import cervical_cancer_measure
 from app.measures.childhood_immunization import childhood_immunization_measure
 from app.measures.colorectal_cancer import colorectal_cancer_measure
 from app.measures.diabetes import diabetes_a1c_measure
+from app.measures.eye_exam import eye_exam_measure
+from app.measures.kidney_health import kidney_health_measure
 from app.measures.mental_health import mental_health_measure
 from app.measures.well_child_visits import well_child_visits_measure
 from app.models import Dependent, Member
@@ -139,6 +142,39 @@ def test_bcs_missing_has_completed_raises():
         breast_cancer_measure.evaluate_submission({})
 
 
+# --- Cervical cancer screening (CCS) ---
+
+
+@pytest.mark.parametrize("age,expected", [(20, False), (21, True), (64, True), (65, False)])
+def test_ccs_age_band(age, expected):
+    dob = f"{TODAY.year - age}-{TODAY.month:02d}-{TODAY.day:02d}"
+    assert cervical_cancer_measure.is_eligible(make_member(dob, sex="F"), TODAY) is expected
+
+
+def test_ccs_requires_female():
+    assert cervical_cancer_measure.is_eligible(make_member("1985-01-01", sex="M"), TODAY) is False
+    assert cervical_cancer_measure.is_eligible(make_member("1985-01-01", sex="U"), TODAY) is False
+
+
+def test_ccs_completed_meets_numerator_no_follow_up():
+    evaluation = cervical_cancer_measure.evaluate_submission({"has_completed": True})
+    assert evaluation["numerator_met"] is True
+    assert evaluation["needs_follow_up"] is False
+    assert cervical_cancer_measure.follow_up_window_days(evaluation) is None
+
+
+def test_ccs_not_completed_wants_help_opens_14_day_follow_up():
+    evaluation = cervical_cancer_measure.evaluate_submission({"has_completed": False, "wants_scheduling_help": True})
+    assert evaluation["numerator_met"] is False
+    assert evaluation["needs_follow_up"] is True
+    assert cervical_cancer_measure.follow_up_window_days(evaluation) == 14
+
+
+def test_ccs_missing_has_completed_raises():
+    with pytest.raises(KeyError):
+        cervical_cancer_measure.evaluate_submission({})
+
+
 # --- Colorectal cancer screening (COL) ---
 
 
@@ -245,6 +281,79 @@ def test_a1c_missing_value_treated_as_untested_control_unknown():
     evaluation = diabetes_a1c_measure.evaluate_submission({"has_recent_test": True, "a1c_value": None})
     assert evaluation["numerator_met"] is True
     assert evaluation["needs_follow_up"] is False  # can't flag poor control without a value
+
+
+# --- Eye Exam for Patients with Diabetes (EED) — diabetes bundle ---
+
+
+def test_eed_requires_diabetes_condition():
+    assert eye_exam_measure.is_eligible(make_member("1970-01-01", conditions=["diabetes"]), TODAY) is True
+    assert eye_exam_measure.is_eligible(make_member("1970-01-01", conditions=[]), TODAY) is False
+
+
+@pytest.mark.parametrize("age,expected", [(17, False), (18, True), (75, True), (76, False)])
+def test_eed_age_band(age, expected):
+    dob = f"{TODAY.year - age}-{TODAY.month:02d}-{TODAY.day:02d}"
+    assert eye_exam_measure.is_eligible(make_member(dob, conditions=["diabetes"]), TODAY) is expected
+
+
+def test_eed_completed_meets_numerator_no_follow_up():
+    evaluation = eye_exam_measure.evaluate_submission({"has_completed": True})
+    assert evaluation["numerator_met"] is True
+    assert evaluation["needs_follow_up"] is False
+    assert eye_exam_measure.follow_up_window_days(evaluation) is None
+
+
+def test_eed_not_completed_wants_help_opens_14_day_follow_up():
+    evaluation = eye_exam_measure.evaluate_submission({"has_completed": False, "wants_scheduling_help": True})
+    assert evaluation["numerator_met"] is False
+    assert evaluation["needs_follow_up"] is True
+    assert eye_exam_measure.follow_up_window_days(evaluation) == 14
+
+
+def test_eed_missing_has_completed_raises():
+    with pytest.raises(KeyError):
+        eye_exam_measure.evaluate_submission({})
+
+
+# --- Kidney Health Evaluation for Patients with Diabetes (KED) — needs BOTH tests ---
+
+
+def test_ked_requires_diabetes_condition():
+    assert kidney_health_measure.is_eligible(make_member("1970-01-01", conditions=["diabetes"]), TODAY) is True
+    assert kidney_health_measure.is_eligible(make_member("1970-01-01", conditions=[]), TODAY) is False
+
+
+@pytest.mark.parametrize("age,expected", [(17, False), (18, True), (85, True), (86, False)])
+def test_ked_age_band(age, expected):
+    dob = f"{TODAY.year - age}-{TODAY.month:02d}-{TODAY.day:02d}"
+    assert kidney_health_measure.is_eligible(make_member(dob, conditions=["diabetes"]), TODAY) is expected
+
+
+def test_ked_both_tests_meet_numerator():
+    evaluation = kidney_health_measure.evaluate_submission({"has_egfr": True, "has_uacr": True})
+    assert evaluation["numerator_met"] is True
+    assert evaluation["needs_follow_up"] is False
+    assert kidney_health_measure.follow_up_window_days(evaluation) is None
+
+
+@pytest.mark.parametrize("egfr,uacr", [(True, False), (False, True), (False, False)])
+def test_ked_one_or_neither_test_does_not_meet_numerator(egfr, uacr):
+    evaluation = kidney_health_measure.evaluate_submission({"has_egfr": egfr, "has_uacr": uacr})
+    assert evaluation["numerator_met"] is False
+
+
+def test_ked_incomplete_wants_help_opens_14_day_follow_up():
+    evaluation = kidney_health_measure.evaluate_submission(
+        {"has_egfr": True, "has_uacr": False, "wants_scheduling_help": True}
+    )
+    assert evaluation["needs_follow_up"] is True
+    assert kidney_health_measure.follow_up_window_days(evaluation) == 14
+
+
+def test_ked_missing_a_test_key_raises():
+    with pytest.raises(KeyError):
+        kidney_health_measure.evaluate_submission({"has_egfr": True})
 
 
 # --- Childhood Immunization Status (CIS) — first dependent-scoped measure ---

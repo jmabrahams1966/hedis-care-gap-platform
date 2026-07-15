@@ -146,3 +146,53 @@ resource "aws_security_group_rule" "ecs_to_db" {
   security_group_id        = aws_security_group.database.id
   source_security_group_id = aws_security_group.ecs_tasks.id
 }
+
+# VPC Flow Logs — a network-level audit trail (accepted + rejected traffic) for
+# the whole VPC, per docs/SECURITY_HIPAA.md §5. Metadata only (src/dst IP, port,
+# bytes) — no packet payload / PHI — so it goes to a plain CloudWatch group.
+resource "aws_cloudwatch_log_group" "flow_logs" {
+  name              = "/vpc/${var.project_name}-flow-logs"
+  retention_in_days = 400
+}
+
+data "aws_iam_policy_document" "flow_logs_assume" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["vpc-flow-logs.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "flow_logs" {
+  name               = "${var.project_name}-vpc-flow-logs"
+  assume_role_policy = data.aws_iam_policy_document.flow_logs_assume.json
+}
+
+data "aws_iam_policy_document" "flow_logs" {
+  statement {
+    actions = [
+      "logs:CreateLogGroup",
+      "logs:CreateLogStream",
+      "logs:PutLogEvents",
+      "logs:DescribeLogGroups",
+      "logs:DescribeLogStreams",
+    ]
+    resources = ["${aws_cloudwatch_log_group.flow_logs.arn}:*"]
+  }
+}
+
+resource "aws_iam_role_policy" "flow_logs" {
+  name   = "${var.project_name}-vpc-flow-logs"
+  role   = aws_iam_role.flow_logs.id
+  policy = data.aws_iam_policy_document.flow_logs.json
+}
+
+resource "aws_flow_log" "this" {
+  vpc_id               = aws_vpc.this.id
+  traffic_type         = "ALL"
+  log_destination_type = "cloud-watch-logs"
+  log_destination      = aws_cloudwatch_log_group.flow_logs.arn
+  iam_role_arn         = aws_iam_role.flow_logs.arn
+}

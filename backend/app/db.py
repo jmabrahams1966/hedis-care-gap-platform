@@ -3,7 +3,15 @@ from sqlalchemy.orm import DeclarativeBase
 
 from .config import settings
 
-engine = create_async_engine(settings.database_url, echo=False)
+# Encrypt the database connection in transit. Only applies to the real Postgres/
+# Aurora driver — the SQLite dev/test URL takes no ssl arg. `require` encrypts
+# without pinning the server cert; tighten to `verify-full` (with the RDS CA
+# bundle shipped in the image) if a payer contract calls for it.
+_connect_args: dict = {}
+if settings.database_url.startswith("postgresql"):
+    _connect_args["ssl"] = "require"
+
+engine = create_async_engine(settings.database_url, echo=False, connect_args=_connect_args)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 

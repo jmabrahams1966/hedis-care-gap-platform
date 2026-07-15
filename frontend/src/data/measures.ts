@@ -1,9 +1,17 @@
 export const MEASURE_LABELS: Record<string, string> = {
   mental_health: "Depression Screening & Follow-Up",
   breast_cancer: "Breast Cancer Screening",
+  cervical_cancer: "Cervical Cancer Screening",
   colorectal_cancer: "Colorectal Cancer Screening",
   blood_pressure: "Controlling High Blood Pressure",
   diabetes_a1c: "Diabetes: HbA1c Testing & Control",
+  eye_exam: "Diabetes: Eye Exam",
+  kidney_health: "Diabetes: Kidney Health Evaluation",
   childhood_immunization: "Childhood Immunization Status",
   well_child_visits: "Well-Child Visits",
+  pdc_diabetes: "Med Adherence: Diabetes",
+  pdc_hypertension: "Med Adherence: Hypertension (RASA)",
+  pdc_statins: "Med Adherence: Statins",
+  ppc_prenatal: "Prenatal Care (Timeliness)",
+  ppc_postpartum: "Postpartum Care",
 };

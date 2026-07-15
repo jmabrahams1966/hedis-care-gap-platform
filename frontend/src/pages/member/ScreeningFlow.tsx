@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useSession } from "../../context/SessionContext";
 import { api, ApiError } from "../../lib/api";
 import { GAD7_ITEMS, PHQ9_ITEMS, RESPONSE_SCALE } from "../../data/instruments";
+import { MEASURE_LABELS } from "../../data/measures";
 import StepIndicator from "../../components/StepIndicator";
 
 interface PendingGap {
@@ -28,31 +30,52 @@ type OnOutcome = (o: Outcome) => void;
 
 export default function ScreeningFlow() {
   const { member } = useSession();
-  const [loadState, setLoadState] = useState<"loading" | "none_due" | "ready" | "error">("loading");
-  const [gap, setGap] = useState<PendingGap | null>(null);
-  const [outcome, setOutcome] = useState<Outcome | null>(null);
+  const [params] = useSearchParams();
+  const [loadState, setLoadState] = useState<"loading" | "error" | "ready">("loading");
+  const [gaps, setGaps] = useState<PendingGap[]>([]);
+  const [completed, setCompleted] = useState<string[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [safety, setSafety] = useState<Outcome | null>(null);
 
   useEffect(() => {
     api
       .get<PendingGap[]>("/api/screenings/pending", member?.token)
-      .then((gaps) => {
-        if (gaps.length === 0) {
-          setLoadState("none_due");
-        } else {
-          setGap(gaps[0]);
-          setLoadState("ready");
-        }
+      .then((g) => {
+        setGaps(g);
+        // If outreach targeted a specific measure, open it first.
+        const focus = params.get("focus");
+        if (focus && g.some((x) => x.care_gap_id === focus)) setActiveId(focus);
+        setLoadState("ready");
       })
       .catch(() => setLoadState("error"));
+    // focus is read once at load; member is the real dependency
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [member]);
 
+  const activeGap = gaps.find((g) => g.care_gap_id === activeId) ?? null;
+  const remaining = gaps.filter((g) => !completed.includes(g.care_gap_id));
+
   async function submit(responses: Record<string, unknown>): Promise<SubmitResult> {
-    if (!gap) throw new Error("No care gap loaded");
+    if (!activeGap) throw new Error("No active check-in");
     return api.post<SubmitResult>(
       "/api/screenings",
-      { care_gap_id: gap.care_gap_id, responses },
+      { care_gap_id: activeGap.care_gap_id, responses },
       member?.token
     );
+  }
+
+  function markDoneAndReturn() {
+    if (activeGap) setCompleted((c) => (c.includes(activeGap.care_gap_id) ? c : [...c, activeGap.care_gap_id]));
+    setSafety(null);
+    setActiveId(null);
+  }
+
+  function handleOutcome(o: Outcome) {
+    if (o.kind === "safety") {
+      setSafety(o); // keep the crisis card up until acknowledged
+      return;
+    }
+    markDoneAndReturn();
   }
 
   if (loadState === "loading")
@@ -62,33 +85,138 @@ export default function ScreeningFlow() {
       </Shell>
     );
   if (loadState === "error")
-    return <Shell>Something went wrong. Please refresh or use the link we sent again.</Shell>;
-  if (loadState === "none_due")
-    return <Shell>You're all caught up — thanks! There's nothing due for you right now.</Shell>;
+    return <Shell>Something went wrong. Please refresh or use your link again.</Shell>;
 
-  if (outcome?.kind === "safety") {
+  if (safety) {
     return (
       <div className="app-shell">
         <div className="safety-card">
-          {outcome.heading && <h2>{outcome.heading}</h2>}
-          {outcome.body}
+          {safety.heading && <h2>{safety.heading}</h2>}
+          {safety.body}
+          <button className="btn secondary" style={{ marginTop: 16 }} onClick={markDoneAndReturn}>
+            Continue to my other check-ins
+          </button>
         </div>
       </div>
     );
   }
 
-  if (outcome?.kind === "done") {
-    return <Shell success>{outcome.body}</Shell>;
+  if (activeGap) {
+    return (
+      <>
+        <div className="app-shell" style={{ paddingTop: 24, paddingBottom: 0 }}>
+          <button className="btn ghost sm" onClick={() => setActiveId(null)}>
+            ← My check-ins
+          </button>
+        </div>
+        {renderMeasureForm(activeGap, submit, handleOutcome)}
+      </>
+    );
   }
 
-  switch (gap?.measure_code) {
+  // Hub: everything the member is due for, ordered by the server's clinical priority.
+  return (
+    <div className="app-shell" style={{ paddingTop: 48 }}>
+      <div className="page-header">
+        <h1>Your check-ins</h1>
+        <p className="muted">
+          Hi{member?.firstName ? ` ${member.firstName}` : ""} — here's what your health plan would like to hear
+          about. Each one only takes a minute.
+        </p>
+      </div>
+
+      {remaining.length === 0 ? (
+        <div className="card" style={{ textAlign: "center" }}>
+          <div style={{ fontSize: 32, marginBottom: 8 }}>✓</div>
+          <p style={{ marginBottom: 0 }}>You're all caught up — thank you!</p>
+        </div>
+      ) : (
+        remaining.map((g) => (
+          <div
+            className="card"
+            key={g.care_gap_id}
+            style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}
+          >
+            <div>
+              <strong>{MEASURE_LABELS[g.measure_code] ?? g.measure_code}</strong>
+              {g.dependent_first_name && (
+                <p className="muted" style={{ margin: 0, fontSize: 13 }}>for {g.dependent_first_name}</p>
+              )}
+            </div>
+            <button className="btn sm" onClick={() => setActiveId(g.care_gap_id)}>
+              Start
+            </button>
+          </div>
+        ))
+      )}
+
+      {completed.length > 0 && remaining.length > 0 && (
+        <p className="muted" style={{ fontSize: 13, marginTop: 8, textAlign: "center" }}>
+          ✓ {completed.length} completed just now — thank you!
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Render the question form for one measure. The measure sub-components are
+ * unchanged; this just routes by measure_code. */
+function renderMeasureForm(gap: PendingGap, submit: OnSubmit, onOutcome: OnOutcome) {
+  switch (gap.measure_code) {
     case "breast_cancer":
       return (
         <YesNoScheduleFlow
           onSubmit={submit}
-          onOutcome={setOutcome}
+          onOutcome={onOutcome}
           question="Have you had a mammogram (breast cancer screening) in the last 2 years?"
           responseKey="has_completed"
+          doneBody={(name) => <>Thanks, {name}! Your check-in is complete.</>}
+        />
+      );
+    case "cervical_cancer":
+      return (
+        <YesNoScheduleFlow
+          onSubmit={submit}
+          onOutcome={onOutcome}
+          question="Have you had a cervical cancer screening (Pap smear and/or HPV test) within the recommended timeframe?"
+          responseKey="has_completed"
+          doneBody={(name) => <>Thanks, {name}! Your check-in is complete.</>}
+        />
+      );
+    case "eye_exam":
+      return (
+        <YesNoScheduleFlow
+          onSubmit={submit}
+          onOutcome={onOutcome}
+          question="Have you had a diabetic eye exam (retinal or dilated eye exam) in the last year?"
+          responseKey="has_completed"
+          doneBody={(name) => <>Thanks, {name}! Your check-in is complete.</>}
+        />
+      );
+    case "kidney_health":
+      return <KidneyHealthFlow onSubmit={submit} onOutcome={onOutcome} />;
+    case "ppc_prenatal":
+      return (
+        <YesNoScheduleFlow
+          onSubmit={submit}
+          onOutcome={onOutcome}
+          question="During this pregnancy, did you have a prenatal care visit in your first trimester?"
+          responseKey="had_prenatal_visit"
+          yesLabel="Yes, I did"
+          noLabel="No / not sure"
+          askScheduling={false}
+          doneBody={(name) => <>Thanks, {name}! Your check-in is complete.</>}
+        />
+      );
+    case "ppc_postpartum":
+      return (
+        <YesNoScheduleFlow
+          onSubmit={submit}
+          onOutcome={onOutcome}
+          question="Since your delivery, have you had a postpartum checkup with your provider (usually 1–12 weeks after birth)?"
+          responseKey="had_postpartum_visit"
+          yesLabel="Yes, I have"
+          noLabel="Not yet"
           doneBody={(name) => <>Thanks, {name}! Your check-in is complete.</>}
         />
       );
@@ -96,22 +224,22 @@ export default function ScreeningFlow() {
       return (
         <YesNoScheduleFlow
           onSubmit={submit}
-          onOutcome={setOutcome}
+          onOutcome={onOutcome}
           question="Have you completed a colorectal cancer screening (colonoscopy, FIT/FOBT test, or similar) within the recommended timeframe?"
           responseKey="has_completed"
           doneBody={(name) => <>Thanks, {name}! Your check-in is complete.</>}
         />
       );
     case "blood_pressure":
-      return <BloodPressureFlow onSubmit={submit} onOutcome={setOutcome} />;
+      return <BloodPressureFlow onSubmit={submit} onOutcome={onOutcome} />;
     case "diabetes_a1c":
-      return <DiabetesA1cFlow onSubmit={submit} onOutcome={setOutcome} />;
+      return <DiabetesA1cFlow onSubmit={submit} onOutcome={onOutcome} />;
     case "childhood_immunization": {
       const childName = gap.dependent_first_name ?? "your child";
       return (
         <YesNoScheduleFlow
           onSubmit={submit}
-          onOutcome={setOutcome}
+          onOutcome={onOutcome}
           question={`Are ${childName}'s recommended immunizations up to date for their 2-year checkup?`}
           responseKey="has_completed"
           yesLabel="Yes, up to date"
@@ -125,7 +253,7 @@ export default function ScreeningFlow() {
       return (
         <YesNoScheduleFlow
           onSubmit={submit}
-          onOutcome={setOutcome}
+          onOutcome={onOutcome}
           question={`Has ${childName} had their annual well-child visit (checkup) with their doctor?`}
           responseKey="has_completed"
           yesLabel="Yes, they have"
@@ -135,7 +263,7 @@ export default function ScreeningFlow() {
       );
     }
     default:
-      return <MentalHealthFlow onSubmit={submit} onOutcome={setOutcome} />;
+      return <MentalHealthFlow onSubmit={submit} onOutcome={onOutcome} />;
   }
 }
 
@@ -241,6 +369,7 @@ function YesNoScheduleFlow({
   doneBody,
   yesLabel = "Yes, I've had one",
   noLabel = "No, not yet",
+  askScheduling = true,
 }: {
   onSubmit: OnSubmit;
   onOutcome: OnOutcome;
@@ -249,6 +378,7 @@ function YesNoScheduleFlow({
   doneBody: (firstName?: string) => React.ReactNode;
   yesLabel?: string;
   noLabel?: string;
+  askScheduling?: boolean;
 }) {
   const { member } = useSession();
   const [hasCompleted, setHasCompleted] = useState<boolean | null>(null);
@@ -256,12 +386,16 @@ function YesNoScheduleFlow({
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  // When scheduling help isn't offered (e.g. a past prenatal window), a "No"
+  // answer needs no second step.
+  const needsHelpStep = askScheduling && hasCompleted === false;
+
   async function finish() {
     setSubmitting(true);
     setError("");
     try {
       await onSubmit({ [responseKey]: hasCompleted, wants_scheduling_help: wantsHelp ?? false });
-      if (!hasCompleted && wantsHelp) {
+      if (needsHelpStep && wantsHelp) {
         onOutcome({
           kind: "done",
           body: <>Thanks! A care manager from your health plan will reach out soon to help you schedule.</>,
@@ -278,7 +412,7 @@ function YesNoScheduleFlow({
 
   return (
     <div className="app-shell">
-      <StepIndicator step={hasCompleted === false ? 1 : 0} total={hasCompleted === false ? 2 : 1} />
+      <StepIndicator step={needsHelpStep ? 1 : 0} total={needsHelpStep ? 2 : 1} />
       {error && <p className="error-text">{error}</p>}
       <div className="card">
         <p>{question}</p>
@@ -305,7 +439,7 @@ function YesNoScheduleFlow({
         </label>
       </div>
 
-      {hasCompleted === false && (
+      {needsHelpStep && (
         <div className="card">
           <p>Would you like help scheduling one?</p>
           <label className="choice">
@@ -326,7 +460,92 @@ function YesNoScheduleFlow({
 
       <button
         className="btn"
-        disabled={submitting || hasCompleted === null || (hasCompleted === false && wantsHelp === null)}
+        disabled={submitting || hasCompleted === null || (needsHelpStep && wantsHelp === null)}
+        onClick={finish}
+        style={{ width: "100%" }}
+      >
+        {submitting ? "Submitting…" : "Submit"}
+      </button>
+    </div>
+  );
+}
+
+/** Kidney Health Evaluation (KED): the numerator needs BOTH tests, so ask
+ * about each independently. */
+function KidneyHealthFlow({ onSubmit, onOutcome }: { onSubmit: OnSubmit; onOutcome: OnOutcome }) {
+  const { member } = useSession();
+  const [hasEgfr, setHasEgfr] = useState<boolean | null>(null);
+  const [hasUacr, setHasUacr] = useState<boolean | null>(null);
+  const [wantsHelp, setWantsHelp] = useState<boolean | null>(null);
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const bothDone = hasEgfr === true && hasUacr === true;
+  const needsHelpStep = hasEgfr !== null && hasUacr !== null && !bothDone;
+
+  async function finish() {
+    setSubmitting(true);
+    setError("");
+    try {
+      await onSubmit({ has_egfr: hasEgfr, has_uacr: hasUacr, wants_scheduling_help: wantsHelp ?? false });
+      if (needsHelpStep && wantsHelp) {
+        onOutcome({
+          kind: "done",
+          body: <>Thanks! A care manager from your health plan will reach out soon to help you schedule.</>,
+        });
+      } else {
+        onOutcome({ kind: "done", body: <>Thanks, {member?.firstName}! Your check-in is complete.</> });
+      }
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not submit. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function YesNo({ value, onChange, name }: { value: boolean | null; onChange: (v: boolean) => void; name: string }) {
+    return (
+      <>
+        <label className="choice">
+          <input type="radio" name={name} checked={value === true} onChange={() => onChange(true)} /> Yes
+        </label>
+        <label className="choice" style={{ marginBottom: 0 }}>
+          <input type="radio" name={name} checked={value === false} onChange={() => onChange(false)} /> No / not sure
+        </label>
+      </>
+    );
+  }
+
+  return (
+    <div className="app-shell">
+      <StepIndicator step={needsHelpStep ? 1 : 0} total={needsHelpStep ? 2 : 1} />
+      {error && <p className="error-text">{error}</p>}
+      <div className="card">
+        <p>In the last year, have you had a <strong>blood test</strong> to check your kidney function (eGFR)?</p>
+        <YesNo value={hasEgfr} onChange={setHasEgfr} name="egfr" />
+      </div>
+      <div className="card">
+        <p>And a <strong>urine test</strong> to check your kidneys (urine albumin, or uACR)?</p>
+        <YesNo value={hasUacr} onChange={setHasUacr} name="uacr" />
+      </div>
+
+      {needsHelpStep && (
+        <div className="card">
+          <p>Would you like help scheduling the test(s) you still need?</p>
+          <label className="choice">
+            <input type="radio" name="kh_help" checked={wantsHelp === true} onChange={() => setWantsHelp(true)} />
+            Yes, please have someone reach out
+          </label>
+          <label className="choice" style={{ marginBottom: 0 }}>
+            <input type="radio" name="kh_help" checked={wantsHelp === false} onChange={() => setWantsHelp(false)} />
+            No thanks, not right now
+          </label>
+        </div>
+      )}
+
+      <button
+        className="btn"
+        disabled={submitting || hasEgfr === null || hasUacr === null || (needsHelpStep && wantsHelp === null)}
         onClick={finish}
         style={{ width: "100%" }}
       >

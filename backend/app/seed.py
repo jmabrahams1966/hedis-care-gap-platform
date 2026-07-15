@@ -6,7 +6,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .config import settings
 from .measures import REGISTRY
 from .measures.base import default_period
-from .models import Dependent, Measure, Member, StaffRole, StaffUser, Tenant, TenantMeasureConfig
+from .measures.exclusions import apply_exclusions_for_member
+from .measures.pdc_service import recompute_pdc_for_member
+from .measures.ppc_service import open_ppc_gaps_for_episode
+from .models import (
+    Dependent,
+    Measure,
+    Member,
+    MedicationFill,
+    MemberExclusion,
+    PregnancyEpisode,
+    StaffRole,
+    StaffUser,
+    Tenant,
+    TenantMeasureConfig,
+)
 from .routers.members import _alias, _open_care_gaps_for_dependent, _open_care_gaps_for_member
 from .security import hash_password
 
@@ -38,6 +52,74 @@ async def ensure_measure_catalog(db: AsyncSession) -> None:
     await db.commit()
 
 
+async def _seed_demo_fills(db: AsyncSession, member: Member | None) -> None:
+    """Give one demo member a realistic pharmacy-fill history so both a passing
+    (adherent) and a failing (non-adherent) PDC gap show up in dev, then run the
+    PDC recompute to open/score those gaps."""
+    if member is None:
+        return
+
+    today = date.today()
+
+    def _fill(drug_class: str, label: str, fill_date: date, days_supply: int, seq: int) -> MedicationFill:
+        return MedicationFill(
+            tenant_id=member.tenant_id,
+            member_id=member.id,
+            drug_class=drug_class,
+            drug_label=label,
+            fill_date=fill_date.isoformat(),
+            days_supply=days_supply,
+            external_claim_id=f"DEMO-RX-{member.external_member_id}-{drug_class}-{seq}",
+            source="demo",
+        )
+
+    # Diabetes: refilled roughly monthly for the last ~6 months → adherent.
+    for i in range(6):
+        db.add(_fill("diabetes", "Metformin 500mg", today - timedelta(days=32 * (i + 1)), 32, i))
+    # Hypertension (RAS antagonist): two early fills, then a long gap → non-adherent.
+    db.add(_fill("rasa", "Lisinopril 10mg", today - timedelta(days=170), 30, 0))
+    db.add(_fill("rasa", "Lisinopril 10mg", today - timedelta(days=140), 30, 1))
+
+    await db.flush()
+    await recompute_pdc_for_member(db, member)
+
+
+async def _seed_demo_episode(db: AsyncSession, member: Member | None) -> None:
+    """Give one demo member a recent delivery episode so the PPC gaps show up in
+    dev with the postpartum visit in its actionable window."""
+    if member is None:
+        return
+    delivery = date.today() - timedelta(days=30)
+    episode = PregnancyEpisode(
+        tenant_id=member.tenant_id,
+        member_id=member.id,
+        delivery_date=delivery.isoformat(),
+        external_episode_id=f"DEMO-DELIVERY-{member.external_member_id}",
+        source="demo",
+    )
+    db.add(episode)
+    await db.flush()
+    await open_ppc_gaps_for_episode(db, member, episode)
+
+
+async def _seed_demo_exclusion(db: AsyncSession, member: Member | None, exclusion_code: str) -> None:
+    """Put a HEDIS exclusion on file for a member and re-apply it so their
+    relevant open gap is marked excluded (out of the denominator) in dev."""
+    if member is None:
+        return
+    db.add(
+        MemberExclusion(
+            tenant_id=member.tenant_id,
+            member_id=member.id,
+            exclusion_code=exclusion_code,
+            reference=f"DEMO-EXCL-{member.external_member_id}",
+            source="demo",
+        )
+    )
+    await db.flush()
+    await apply_exclusions_for_member(db, member)
+
+
 async def seed_demo_tenant(db: AsyncSession) -> None:
     if not settings.dev_mode:
         return
@@ -55,11 +137,19 @@ async def seed_demo_tenant(db: AsyncSession) -> None:
     for measure_code in (
         "mental_health",
         "breast_cancer",
+        "cervical_cancer",
         "colorectal_cancer",
         "blood_pressure",
         "diabetes_a1c",
+        "eye_exam",
+        "kidney_health",
         "childhood_immunization",
         "well_child_visits",
+        "pdc_diabetes",
+        "pdc_hypertension",
+        "pdc_statins",
+        "ppc_prenatal",
+        "ppc_postpartum",
     ):
         db.add(TenantMeasureConfig(tenant_id=tenant.id, measure_code=measure_code, enabled=True))
 
@@ -114,6 +204,21 @@ async def seed_demo_tenant(db: AsyncSession) -> None:
         await db.flush()
         await _open_care_gaps_for_member(db, member)
         members_by_external_id[external_id] = member
+
+    # Demo pharmacy fills so the PDC adherence measures show real gaps in dev:
+    # Deepak (EXT-1004, diabetes + hypertension) is adherent on his diabetes meds
+    # (a monthly refill history → completed gap) but has fallen off his blood-
+    # pressure meds (two early fills, then nothing → open gap for refill outreach).
+    # Assumes a mid-year-or-later run so the dates land in the past.
+    await _seed_demo_fills(db, members_by_external_id.get("EXT-1004"))
+
+    # Elena (EXT-1005, F) delivered ~30 days ago → open PPC gaps, with the
+    # postpartum visit currently in its actionable 7–84 day window.
+    await _seed_demo_episode(db, members_by_external_id.get("EXT-1005"))
+
+    # Fatima (EXT-1006, F, ~56) has a hysterectomy on file → her cervical
+    # screening gap should drop out of the denominator as excluded.
+    await _seed_demo_exclusion(db, members_by_external_id.get("EXT-1006"), "hysterectomy")
 
     today = date.today()
     for guardian_external_id, external_dependent_id, first, last, age_years, sex in DEMO_DEPENDENTS:

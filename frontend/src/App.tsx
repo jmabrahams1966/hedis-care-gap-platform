@@ -10,6 +10,7 @@ import Queue from "./pages/care-manager/Queue";
 import CaseDetail from "./pages/care-manager/CaseDetail";
 import TenantConfig from "./pages/admin/TenantConfig";
 import SuperAdmin from "./pages/superadmin/SuperAdmin";
+import Security from "./pages/Security";
 
 function RequireStaff({ children }: { children: JSX.Element }) {
   const { staff } = useSession();
@@ -76,6 +77,14 @@ export default function App() {
         element={
           <StaffPage wide>
             <SuperAdmin />
+          </StaffPage>
+        }
+      />
+      <Route
+        path="/security"
+        element={
+          <StaffPage>
+            <Security />
           </StaffPage>
         }
       />

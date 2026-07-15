@@ -23,6 +23,9 @@ class BreastCancerScreeningMeasure(Measure):
         "Outreach to confirm mammogram completion within the measurement period, "
         "with scheduling assistance offered when a member hasn't been screened."
     )
+    # A bilateral mastectomy (or two unilateral mastectomies) removes a member
+    # from the denominator.
+    exclusion_codes = frozenset({"bilateral_mastectomy"})
 
     def is_eligible(self, subject: Demographic, as_of: date) -> bool:
         if subject.sex != "F":

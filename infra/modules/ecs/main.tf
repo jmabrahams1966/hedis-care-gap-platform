@@ -117,7 +117,8 @@ resource "aws_iam_role" "task" {
   assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
 }
 
-# Runtime permissions the app itself needs: send outreach via SES/SMS.
+# Runtime permissions the app itself needs: send outreach via SES/SMS, and
+# append (never delete) audit events to the WORM archive bucket.
 data "aws_iam_policy_document" "task_permissions" {
   statement {
     actions   = ["ses:SendEmail", "ses:SendRawEmail"]
@@ -126,6 +127,17 @@ data "aws_iam_policy_document" "task_permissions" {
   statement {
     actions   = ["sms-voice:SendTextMessage", "sms-voice:*"]
     resources = ["*"]
+  }
+  # PutObject only — no Delete and no Object-Lock bypass, so a compromised app
+  # cannot erase the trail it writes.
+  statement {
+    actions   = ["s3:PutObject"]
+    resources = ["${var.audit_bucket_arn}/*"]
+  }
+  # Needed to write KMS-encrypted objects to the audit bucket.
+  statement {
+    actions   = ["kms:GenerateDataKey", "kms:Encrypt"]
+    resources = [var.kms_key_arn]
   }
 }
 
@@ -158,6 +170,7 @@ resource "aws_ecs_task_definition" "this" {
       secrets = [
         { name = "DATABASE_URL", valueFrom = var.database_url_secret_arn },
         { name = "JWT_SECRET", valueFrom = "${var.app_secrets_arn}:jwt_secret::" },
+        { name = "PII_ENCRYPTION_KEY", valueFrom = "${var.app_secrets_arn}:pii_key::" },
       ]
       logConfiguration = {
         logDriver = "awslogs"
@@ -244,6 +257,7 @@ resource "aws_ecs_task_definition" "cron" {
       secrets = [
         { name = "DATABASE_URL", valueFrom = var.database_url_secret_arn },
         { name = "JWT_SECRET", valueFrom = "${var.app_secrets_arn}:jwt_secret::" },
+        { name = "PII_ENCRYPTION_KEY", valueFrom = "${var.app_secrets_arn}:pii_key::" },
       ]
       logConfiguration = {
         logDriver = "awslogs"

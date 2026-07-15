@@ -24,6 +24,9 @@ class ColorectalCancerScreeningMeasure(Measure):
         "sigmoidoscopy, or CT colonography) within the recommended interval, with scheduling "
         "assistance offered when a member hasn't been screened."
     )
+    # A total colectomy or a history of colorectal cancer removes a member from
+    # the denominator.
+    exclusion_codes = frozenset({"total_colectomy", "colorectal_cancer_history"})
 
     def is_eligible(self, subject: Demographic, as_of: date) -> bool:
         age = age_in_years(subject.date_of_birth, as_of)

@@ -18,11 +18,11 @@ def verify_password(password: str, password_hash: str) -> bool:
     return pwd_context.verify(password, password_hash)
 
 
-def create_jwt(subject: str, claims: dict) -> str:
+def create_jwt(subject: str, claims: dict, *, expires_delta: timedelta | None = None) -> str:
     payload = {
         "sub": subject,
         "iat": datetime.now(timezone.utc),
-        "exp": datetime.now(timezone.utc) + timedelta(hours=settings.jwt_ttl_hours),
+        "exp": datetime.now(timezone.utc) + (expires_delta or timedelta(hours=settings.jwt_ttl_hours)),
         **claims,
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")

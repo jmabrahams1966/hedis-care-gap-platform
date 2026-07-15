@@ -37,6 +37,20 @@ class StaffLogin(BaseModel):
     password: str
 
 
+class MfaCode(BaseModel):
+    """A 6-digit TOTP code, used to confirm enrollment or disable MFA."""
+
+    code: str
+
+
+class MfaVerify(BaseModel):
+    """Completes a login for an MFA-enabled staff user: the short-lived
+    `mfa_token` from the password step plus the current authenticator code."""
+
+    mfa_token: str
+    code: str
+
+
 class StaffOut(BaseModel):
     id: str
     email: str
@@ -105,6 +119,14 @@ class MagicLinkRequest(BaseModel):
     date_of_birth: str
 
 
+class MagicLinkByPhone(BaseModel):
+    """Alternative identity check for members who don't have their member ID
+    handy — phone number + DOB. Phone is normalized to E.164 before lookup."""
+
+    phone: str
+    date_of_birth: str
+
+
 class MagicLinkVerify(BaseModel):
     token: str
 
@@ -118,6 +140,46 @@ class ScreeningSubmit(BaseModel):
 
     care_gap_id: str
     responses: dict
+
+
+class MedicationFillCreate(BaseModel):
+    """One pharmacy dispensing row from the payer's claims feed. `drug_class` is
+    the therapeutic class this platform tracks for PDC adherence — one of
+    "diabetes", "rasa" (RAS-antagonist antihypertensives), or "statins"."""
+
+    external_member_id: str
+    drug_class: str
+    fill_date: str  # YYYY-MM-DD
+    days_supply: int
+    ndc: str = ""
+    drug_label: str = ""
+    external_claim_id: str | None = None
+    source: str = "pharmacy_claim"
+
+
+class PregnancyEpisodeCreate(BaseModel):
+    """A delivery episode from the payer's claims feed — the anchor for PPC.
+    `delivery_date` is required; `estimated_due_date` is optional and enables
+    prospective prenatal outreach when the pregnancy is known before delivery."""
+
+    external_member_id: str
+    delivery_date: str  # YYYY-MM-DD
+    estimated_due_date: str = ""
+    external_episode_id: str | None = None
+    source: str = "claim"
+
+
+class MemberExclusionCreate(BaseModel):
+    """A HEDIS exclusion event from the payer's claims feed. `exclusion_code` is
+    one the platform understands — a broad code (hospice, deceased,
+    palliative_care) or a measure-specific one (hysterectomy, bilateral_mastectomy,
+    total_colectomy, colorectal_cancer_history). `reference` is the claim/encounter
+    id an auditor will ask for."""
+
+    external_member_id: str
+    exclusion_code: str
+    reference: str = ""
+    source: str = "claim"
 
 
 class CaseNoteCreate(BaseModel):
