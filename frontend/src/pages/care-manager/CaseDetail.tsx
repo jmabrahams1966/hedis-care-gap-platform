@@ -3,6 +3,8 @@ import { Link, useParams } from "react-router-dom";
 import { useSession } from "../../context/SessionContext";
 import { api } from "../../lib/api";
 import { MEASURE_LABELS } from "../../data/measures";
+import MhTrendChart from "./MhTrendChart";
+import ClinicalNotes, { type CaseNote } from "./ClinicalNotes";
 
 interface InstrumentScore {
   total: number;
@@ -62,13 +64,6 @@ interface Submission {
   };
 }
 
-interface Note {
-  id: string;
-  note: string;
-  author_id: string;
-  created_at: string;
-}
-
 interface CaseDetailResponse {
   id: string;
   measure_code: string;
@@ -78,10 +73,11 @@ interface CaseDetailResponse {
   numerator_source: string;
   numerator_source_reference: string;
   follow_up_due_at: string | null;
+  member_id: string;
   member_alias: string;
   dependent_alias: string | null;
   submissions: Submission[];
-  notes: Note[];
+  notes: CaseNote[];
 }
 
 const NUMERATOR_SOURCE_LABEL: Record<string, string> = {
@@ -109,7 +105,6 @@ export default function CaseDetail() {
   const { gapId } = useParams();
   const { staff } = useSession();
   const [data, setData] = useState<CaseDetailResponse | null>(null);
-  const [note, setNote] = useState("");
   const [sendingOutreach, setSendingOutreach] = useState(false);
 
   function load() {
@@ -118,13 +113,6 @@ export default function CaseDetail() {
   }
 
   useEffect(load, [gapId, staff]);
-
-  async function addNote() {
-    if (!gapId || !note.trim()) return;
-    await api.post(`/api/care-gaps/${gapId}/notes`, { note }, staff?.token);
-    setNote("");
-    load();
-  }
 
   async function updateStatus(status: string, reason = "") {
     if (!gapId) return;
@@ -195,157 +183,162 @@ export default function CaseDetail() {
         </div>
       )}
 
-      <div className="card">
-        {data.follow_up_due_at && (
-          <p>
-            <strong>Follow-up due:</strong> {new Date(data.follow_up_due_at).toLocaleString()}
-          </p>
-        )}
-        <p>
-          <strong>Numerator:</strong> {data.numerator_met ? "Met" : "Not met"} —{" "}
-          <span className={`badge ${data.numerator_source === "claims_confirmed" ? "done" : "open"}`}>
-            {NUMERATOR_SOURCE_LABEL[data.numerator_source] ?? data.numerator_source}
-          </span>
-          {data.numerator_source_reference && (
-            <span className="muted" style={{ fontSize: 13 }}>
-              {" "}
-              ({data.numerator_source_reference})
-            </span>
+      <div className="workspace-grid">
+        <div className="workspace-main">
+          {data.measure_code === "mental_health" && (
+            <div className="card">
+              <h2 className="card__title">Depression &amp; anxiety trend</h2>
+              <MhTrendChart memberId={data.member_id} />
+            </div>
           )}
-        </p>
-        <div className="stack">
-          {!isClosed && (
-            <>
-              <button className="btn secondary" onClick={sendOutreach} disabled={sendingOutreach}>
-                {sendingOutreach ? "Sending…" : "Send outreach"}
-              </button>
-              <button className="btn" onClick={() => updateStatus("closed")}>
-                Mark closed
-              </button>
-              <button className="btn danger" onClick={excludeGap}>
-                Exclude
-              </button>
-            </>
-          )}
-          {data.numerator_source !== "claims_confirmed" && (
-            <button className="btn secondary" onClick={confirmNumerator}>
-              Confirm via claims
-            </button>
-          )}
-        </div>
-      </div>
 
-      <h3>Screening results</h3>
-      {data.submissions.length === 0 && <div className="card empty-state">No submissions yet.</div>}
-      {data.submissions.map((s, i) => (
-        <div className="card" key={i}>
-          <p className="muted" style={{ fontSize: 13, marginBottom: 8 }}>
-            {new Date(s.submitted_at).toLocaleString()}
-          </p>
-          <div className="stack">
-            {s.instrument_scores.phq9 && (
-              <span className={`badge ${SEVERITY_BADGE[s.instrument_scores.phq9.severity] ?? "open"}`}>
-                PHQ-9: {s.instrument_scores.phq9.total} ({s.instrument_scores.phq9.severity.replace(/_/g, " ")})
-              </span>
-            )}
-            {s.instrument_scores.gad7 && (
-              <span className={`badge ${SEVERITY_BADGE[s.instrument_scores.gad7.severity] ?? "open"}`}>
-                GAD-7: {s.instrument_scores.gad7.total} ({s.instrument_scores.gad7.severity})
-              </span>
-            )}
-            {s.instrument_scores.bcs && (
-              <span className={`badge ${s.instrument_scores.bcs.has_completed ? "done" : "follow-up"}`}>
-                Mammogram: {s.instrument_scores.bcs.has_completed ? "completed" : "not completed"}
-                {!s.instrument_scores.bcs.has_completed &&
-                  (s.instrument_scores.bcs.wants_scheduling_help ? " — wants help" : " — declined help")}
-              </span>
-            )}
-            {s.instrument_scores.col && (
-              <span className={`badge ${s.instrument_scores.col.has_completed ? "done" : "follow-up"}`}>
-                Colorectal screening: {s.instrument_scores.col.has_completed ? "completed" : "not completed"}
-                {!s.instrument_scores.col.has_completed &&
-                  (s.instrument_scores.col.wants_scheduling_help ? " — wants help" : " — declined help")}
-              </span>
-            )}
-            {s.instrument_scores.bp && (
-              <span className={`badge ${s.instrument_scores.bp.crisis ? "safety" : s.instrument_scores.bp.controlled ? "done" : "follow-up"}`}>
-                BP: {s.instrument_scores.bp.systolic}/{s.instrument_scores.bp.diastolic}
-                {s.instrument_scores.bp.crisis ? " — crisis range" : s.instrument_scores.bp.controlled ? " — controlled" : " — above goal"}
-              </span>
-            )}
-            {s.instrument_scores.a1c && (
-              <span className={`badge ${!s.instrument_scores.a1c.has_recent_test || s.instrument_scores.a1c.poor_control ? "follow-up" : "done"}`}>
-                {s.instrument_scores.a1c.has_recent_test
-                  ? `HbA1c: ${s.instrument_scores.a1c.value ?? "unknown"}%${s.instrument_scores.a1c.poor_control ? " — poor control" : ""}`
-                  : "HbA1c: no recent test"}
-              </span>
-            )}
-            {s.instrument_scores.cis && (
-              <span className={`badge ${s.instrument_scores.cis.has_completed ? "done" : "follow-up"}`}>
-                Immunizations: {s.instrument_scores.cis.has_completed ? "up to date" : "not up to date"}
-                {!s.instrument_scores.cis.has_completed &&
-                  (s.instrument_scores.cis.wants_scheduling_help ? " — wants help" : " — declined help")}
-              </span>
-            )}
-            {s.instrument_scores.wcv && (
-              <span className={`badge ${s.instrument_scores.wcv.has_completed ? "done" : "follow-up"}`}>
-                Well-child visit: {s.instrument_scores.wcv.has_completed ? "completed" : "not completed"}
-                {!s.instrument_scores.wcv.has_completed &&
-                  (s.instrument_scores.wcv.wants_scheduling_help ? " — wants help" : " — declined help")}
-              </span>
-            )}
-            {s.instrument_scores.ccs && (
-              <span className={`badge ${s.instrument_scores.ccs.has_completed ? "done" : "follow-up"}`}>
-                Cervical screening: {s.instrument_scores.ccs.has_completed ? "completed" : "not completed"}
-                {!s.instrument_scores.ccs.has_completed &&
-                  (s.instrument_scores.ccs.wants_scheduling_help ? " — wants help" : " — declined help")}
-              </span>
-            )}
-            {s.instrument_scores.eed && (
-              <span className={`badge ${s.instrument_scores.eed.has_completed ? "done" : "follow-up"}`}>
-                Diabetic eye exam: {s.instrument_scores.eed.has_completed ? "completed" : "not completed"}
-                {!s.instrument_scores.eed.has_completed &&
-                  (s.instrument_scores.eed.wants_scheduling_help ? " — wants help" : " — declined help")}
-              </span>
-            )}
-            {s.instrument_scores.ked && (
-              <span
-                className={`badge ${s.instrument_scores.ked.has_egfr && s.instrument_scores.ked.has_uacr ? "done" : "follow-up"}`}
-              >
-                Kidney tests: eGFR {s.instrument_scores.ked.has_egfr ? "✓" : "✗"}, uACR{" "}
-                {s.instrument_scores.ked.has_uacr ? "✓" : "✗"}
-              </span>
-            )}
-            {s.instrument_scores.ppc_prenatal && (
-              <span className={`badge ${s.instrument_scores.ppc_prenatal.had_prenatal_visit ? "done" : "follow-up"}`}>
-                Prenatal visit: {s.instrument_scores.ppc_prenatal.had_prenatal_visit ? "yes" : "not reported"}
-              </span>
-            )}
-            {s.instrument_scores.ppc_postpartum && (
-              <span className={`badge ${s.instrument_scores.ppc_postpartum.had_postpartum_visit ? "done" : "follow-up"}`}>
-                Postpartum visit: {s.instrument_scores.ppc_postpartum.had_postpartum_visit ? "completed" : "not yet"}
-                {!s.instrument_scores.ppc_postpartum.had_postpartum_visit &&
-                  (s.instrument_scores.ppc_postpartum.wants_scheduling_help ? " — wants help" : " — declined help")}
-              </span>
-            )}
+          <div className="card">
+            <h2 className="card__title">Screening results</h2>
+            {data.submissions.length === 0 && <p className="empty-state">No submissions yet.</p>}
+            {data.submissions.map((s, i) => (
+              <div className="submission-row" key={i}>
+                <p className="muted" style={{ fontSize: 13, marginBottom: 8 }}>
+                  {new Date(s.submitted_at).toLocaleString()}
+                </p>
+                <div className="stack">
+                  {s.instrument_scores.phq9 && (
+                    <span className={`badge ${SEVERITY_BADGE[s.instrument_scores.phq9.severity] ?? "open"}`}>
+                      PHQ-9: {s.instrument_scores.phq9.total} ({s.instrument_scores.phq9.severity.replace(/_/g, " ")})
+                    </span>
+                  )}
+                  {s.instrument_scores.gad7 && (
+                    <span className={`badge ${SEVERITY_BADGE[s.instrument_scores.gad7.severity] ?? "open"}`}>
+                      GAD-7: {s.instrument_scores.gad7.total} ({s.instrument_scores.gad7.severity})
+                    </span>
+                  )}
+                  {s.instrument_scores.bcs && (
+                    <span className={`badge ${s.instrument_scores.bcs.has_completed ? "done" : "follow-up"}`}>
+                      Mammogram: {s.instrument_scores.bcs.has_completed ? "completed" : "not completed"}
+                      {!s.instrument_scores.bcs.has_completed &&
+                        (s.instrument_scores.bcs.wants_scheduling_help ? " — wants help" : " — declined help")}
+                    </span>
+                  )}
+                  {s.instrument_scores.col && (
+                    <span className={`badge ${s.instrument_scores.col.has_completed ? "done" : "follow-up"}`}>
+                      Colorectal screening: {s.instrument_scores.col.has_completed ? "completed" : "not completed"}
+                      {!s.instrument_scores.col.has_completed &&
+                        (s.instrument_scores.col.wants_scheduling_help ? " — wants help" : " — declined help")}
+                    </span>
+                  )}
+                  {s.instrument_scores.bp && (
+                    <span className={`badge ${s.instrument_scores.bp.crisis ? "safety" : s.instrument_scores.bp.controlled ? "done" : "follow-up"}`}>
+                      BP: {s.instrument_scores.bp.systolic}/{s.instrument_scores.bp.diastolic}
+                      {s.instrument_scores.bp.crisis ? " — crisis range" : s.instrument_scores.bp.controlled ? " — controlled" : " — above goal"}
+                    </span>
+                  )}
+                  {s.instrument_scores.a1c && (
+                    <span className={`badge ${!s.instrument_scores.a1c.has_recent_test || s.instrument_scores.a1c.poor_control ? "follow-up" : "done"}`}>
+                      {s.instrument_scores.a1c.has_recent_test
+                        ? `HbA1c: ${s.instrument_scores.a1c.value ?? "unknown"}%${s.instrument_scores.a1c.poor_control ? " — poor control" : ""}`
+                        : "HbA1c: no recent test"}
+                    </span>
+                  )}
+                  {s.instrument_scores.cis && (
+                    <span className={`badge ${s.instrument_scores.cis.has_completed ? "done" : "follow-up"}`}>
+                      Immunizations: {s.instrument_scores.cis.has_completed ? "up to date" : "not up to date"}
+                      {!s.instrument_scores.cis.has_completed &&
+                        (s.instrument_scores.cis.wants_scheduling_help ? " — wants help" : " — declined help")}
+                    </span>
+                  )}
+                  {s.instrument_scores.wcv && (
+                    <span className={`badge ${s.instrument_scores.wcv.has_completed ? "done" : "follow-up"}`}>
+                      Well-child visit: {s.instrument_scores.wcv.has_completed ? "completed" : "not completed"}
+                      {!s.instrument_scores.wcv.has_completed &&
+                        (s.instrument_scores.wcv.wants_scheduling_help ? " — wants help" : " — declined help")}
+                    </span>
+                  )}
+                  {s.instrument_scores.ccs && (
+                    <span className={`badge ${s.instrument_scores.ccs.has_completed ? "done" : "follow-up"}`}>
+                      Cervical screening: {s.instrument_scores.ccs.has_completed ? "completed" : "not completed"}
+                      {!s.instrument_scores.ccs.has_completed &&
+                        (s.instrument_scores.ccs.wants_scheduling_help ? " — wants help" : " — declined help")}
+                    </span>
+                  )}
+                  {s.instrument_scores.eed && (
+                    <span className={`badge ${s.instrument_scores.eed.has_completed ? "done" : "follow-up"}`}>
+                      Diabetic eye exam: {s.instrument_scores.eed.has_completed ? "completed" : "not completed"}
+                      {!s.instrument_scores.eed.has_completed &&
+                        (s.instrument_scores.eed.wants_scheduling_help ? " — wants help" : " — declined help")}
+                    </span>
+                  )}
+                  {s.instrument_scores.ked && (
+                    <span
+                      className={`badge ${s.instrument_scores.ked.has_egfr && s.instrument_scores.ked.has_uacr ? "done" : "follow-up"}`}
+                    >
+                      Kidney tests: eGFR {s.instrument_scores.ked.has_egfr ? "✓" : "✗"}, uACR{" "}
+                      {s.instrument_scores.ked.has_uacr ? "✓" : "✗"}
+                    </span>
+                  )}
+                  {s.instrument_scores.ppc_prenatal && (
+                    <span className={`badge ${s.instrument_scores.ppc_prenatal.had_prenatal_visit ? "done" : "follow-up"}`}>
+                      Prenatal visit: {s.instrument_scores.ppc_prenatal.had_prenatal_visit ? "yes" : "not reported"}
+                    </span>
+                  )}
+                  {s.instrument_scores.ppc_postpartum && (
+                    <span className={`badge ${s.instrument_scores.ppc_postpartum.had_postpartum_visit ? "done" : "follow-up"}`}>
+                      Postpartum visit: {s.instrument_scores.ppc_postpartum.had_postpartum_visit ? "completed" : "not yet"}
+                      {!s.instrument_scores.ppc_postpartum.had_postpartum_visit &&
+                        (s.instrument_scores.ppc_postpartum.wants_scheduling_help ? " — wants help" : " — declined help")}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
-        </div>
-      ))}
 
-      <h3>Case notes</h3>
-      {data.notes.map((n) => (
-        <div className="card card--tight" key={n.id}>
-          <p style={{ marginBottom: 4 }}>{n.note}</p>
-          <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
-            {new Date(n.created_at).toLocaleString()}
-          </p>
+          <ClinicalNotes gapId={data.id} notes={data.notes} onAdded={load} />
+          {/* care-plan slot — Feature B Phase 3 */}
         </div>
-      ))}
-      <div className="card">
-        <textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add a note…" />
-        <button className="btn" onClick={addNote} disabled={!note.trim()}>
-          Add note
-        </button>
+
+        <div className="workspace-side">
+          <div className="card">
+            <h2 className="card__title">Case management</h2>
+            {data.follow_up_due_at && (
+              <p>
+                <strong>Follow-up due:</strong> {new Date(data.follow_up_due_at).toLocaleString()}
+              </p>
+            )}
+            <p>
+              <strong>Numerator:</strong> {data.numerator_met ? "Met" : "Not met"} —{" "}
+              <span className={`badge ${data.numerator_source === "claims_confirmed" ? "done" : "open"}`}>
+                {NUMERATOR_SOURCE_LABEL[data.numerator_source] ?? data.numerator_source}
+              </span>
+              {data.numerator_source_reference && (
+                <span className="muted" style={{ fontSize: 13 }}>
+                  {" "}
+                  ({data.numerator_source_reference})
+                </span>
+              )}
+            </p>
+            <div className="stack">
+              {!isClosed && (
+                <>
+                  <button className="btn secondary" onClick={sendOutreach} disabled={sendingOutreach}>
+                    {sendingOutreach ? "Sending…" : "Send outreach"}
+                  </button>
+                  <button className="btn" onClick={() => updateStatus("closed")}>
+                    Mark closed
+                  </button>
+                  <button className="btn danger" onClick={excludeGap}>
+                    Exclude
+                  </button>
+                </>
+              )}
+              {data.numerator_source !== "claims_confirmed" && (
+                <button className="btn secondary" onClick={confirmNumerator}>
+                  Confirm via claims
+                </button>
+              )}
+            </div>
+          </div>
+          {/* tasks slot — Feature B Phase 2 */}
+          {/* safety slot — Feature B Phase 4 */}
+        </div>
       </div>
     </>
   );

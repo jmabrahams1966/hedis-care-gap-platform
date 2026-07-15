@@ -96,6 +96,7 @@ async def case_detail(
         "numerator_source": gap.numerator_source,
         "numerator_source_reference": gap.numerator_source_reference,
         "follow_up_due_at": gap.follow_up_due_at,
+        "member_id": gap.member_id,  # internal UUID (no PII) — lets the workspace load screening history
         "member_alias": member.alias,
         "dependent_alias": dependent.alias if dependent else None,
         "submissions": [

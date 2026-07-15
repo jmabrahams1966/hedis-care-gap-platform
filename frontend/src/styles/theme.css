@@ -633,3 +633,112 @@ td.num {
     grid-template-columns: 1fr;
   }
 }
+
+/* --- Care-management workspace (Feature B) --- */
+
+.workspace-grid {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 16px;
+  align-items: start;
+}
+.workspace-main,
+.workspace-side {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.workspace-main .card,
+.workspace-side .card {
+  margin-bottom: 0;
+}
+
+.submission-row {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.submission-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+.submission-row:first-of-type {
+  padding-top: 0;
+}
+
+/* Notes */
+.note-row {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.note-row:last-of-type {
+  border-bottom: none;
+}
+.note-row__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.note-composer {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.note-composer select {
+  max-width: 220px;
+}
+
+/* MH trend chart */
+.trend-chart {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.trend-line {
+  fill: none;
+  stroke-width: 2;
+}
+.trend-line--phq9 {
+  stroke: var(--primary-500);
+}
+.trend-line--gad7 {
+  stroke: var(--warning);
+}
+.trend-dot--phq9 {
+  fill: var(--primary-500);
+}
+.trend-dot--gad7 {
+  fill: var(--warning);
+}
+.trend-grid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.trend-axis {
+  fill: var(--text-faint);
+  font-size: 10px;
+}
+.trend-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+}
+.trend-swatch {
+  width: 12px;
+  height: 3px;
+  border-radius: 2px;
+  display: inline-block;
+}
+.trend-swatch--phq9 {
+  background: var(--primary-500);
+}
+.trend-swatch--gad7 {
+  background: var(--warning);
+}
+
+@media (max-width: 860px) {
+  .workspace-grid {
+    grid-template-columns: 1fr;
+  }
+}
