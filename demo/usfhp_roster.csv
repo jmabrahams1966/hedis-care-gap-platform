@@ -1,0 +1,11 @@
+external_member_id,external_dependent_id,guardian_external_member_id,first_name,last_name,date_of_birth,sex,conditions,phone,email,preferred_channel,preferred_language,consent_sms,consent_email
+USF-101,,,Robert,Hayes,1958-04-12,M,hypertension|diabetes,+15550100101,robert.hayes@example.com,email,en,false,true
+USF-102,,,Linda,Carter,1966-09-30,F,,+15550100102,linda.carter@example.com,email,en,false,true
+USF-103,,,Marcus,Bell,1979-02-18,M,hypertension,+15550100103,marcus.bell@example.com,email,en,false,true
+USF-104,,,Angela,Ruiz,1972-11-05,F,diabetes,+15550100104,angela.ruiz@example.com,email,en,false,true
+USF-105,,,David,Nguyen,1990-06-22,M,,+15550100105,david.nguyen@example.com,email,en,false,true
+USF-106,,,Sandra,Kim,1955-01-15,F,hypertension,+15550100106,sandra.kim@example.com,email,en,false,true
+USF-107,,,James,Foster,1985-07-08,M,,+15550100107,james.foster@example.com,email,en,false,true
+USF-108,,,Emily,Turner,1988-03-14,F,,+15550100108,emily.turner@example.com,email,en,false,true
+,DEP-201,USF-107,Noah,Foster,2024-08-01,M,,,,,,,
+,DEP-202,USF-108,Ava,Turner,2016-05-10,F,,,,,,,
