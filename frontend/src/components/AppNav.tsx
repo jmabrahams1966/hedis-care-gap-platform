@@ -14,7 +14,7 @@ export default function AppNav() {
 
   function logout() {
     setStaff(null);
-    navigate("/login");
+    navigate("/");
   }
 
   const links: { to: string; label: string }[] = [];

@@ -4,7 +4,12 @@ import { api, ApiError } from "../../lib/api";
 
 type Mode = "id" | "phone";
 
-export default function MemberEntry() {
+/**
+ * Member sign-in: Member ID (or phone) + date of birth → magic link by SMS/email.
+ * Extracted from the old MemberEntry page so it can be composed under the unified
+ * login's role selector. Self-contained (no page chrome).
+ */
+export default function MemberSignInForm() {
   const [mode, setMode] = useState<Mode>("id");
   const [memberId, setMemberId] = useState("");
   const [phone, setPhone] = useState("");
@@ -36,40 +41,32 @@ export default function MemberEntry() {
 
   if (sent) {
     return (
-      <div className="app-shell" style={{ paddingTop: 64 }}>
-        <div className="card" style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 32, marginBottom: 8 }}>✓</div>
-          <h2>Check your phone or email</h2>
-          <p className="muted">
-            If we found a match, a secure one-time link was just sent to you. It's single-use — request a new one
-            here anytime if it expires.
-          </p>
-          {devToken && (
-            <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px dashed var(--border)" }}>
-              <p className="muted" style={{ fontSize: 13 }}>Dev mode — link normally sent by SMS/email:</p>
-              <button className="btn" onClick={() => navigate(`/verify?token=${devToken}`)}>
-                Continue (dev shortcut)
-              </button>
-            </div>
-          )}
-        </div>
+      <div className="card" style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 32, marginBottom: 8 }}>✓</div>
+        <h3 style={{ marginTop: 0 }}>Check your phone or email</h3>
+        <p className="muted">
+          If we found a match, a secure one-time link was just sent to you. It's single-use — request a new one here
+          anytime if it expires.
+        </p>
+        {devToken && (
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px dashed var(--border)" }}>
+            <p className="muted" style={{ fontSize: 13 }}>Dev mode — link normally sent by SMS/email:</p>
+            <button className="btn" onClick={() => navigate(`/verify?token=${devToken}`)}>
+              Continue (dev shortcut)
+            </button>
+          </div>
+        )}
       </div>
     );
   }
 
   return (
-    <div className="app-shell" style={{ paddingTop: 64 }}>
-      <h2>Start your check-in</h2>
-      <p className="muted">
-        Easiest way in: tap the link we texted or emailed you. Or enter your details here to get a fresh link.
+    <>
+      <p className="muted" style={{ marginTop: 0 }}>
+        Enter the details from your health plan card to get a secure sign-in link by text or email.
       </p>
-
       <div className="stack" style={{ marginBottom: 12, gap: 8 }}>
-        <button
-          type="button"
-          className={mode === "id" ? "btn sm" : "btn secondary sm"}
-          onClick={() => setMode("id")}
-        >
+        <button type="button" className={mode === "id" ? "btn sm" : "btn secondary sm"} onClick={() => setMode("id")}>
           Use member ID
         </button>
         <button
@@ -80,7 +77,6 @@ export default function MemberEntry() {
           Use phone number
         </button>
       </div>
-
       <form className="card" onSubmit={onSubmit}>
         {error && <p className="error-text">{error}</p>}
         {mode === "id" ? (
@@ -118,6 +114,6 @@ export default function MemberEntry() {
           {loading ? "Sending…" : "Send me a link"}
         </button>
       </form>
-    </div>
+    </>
   );
 }

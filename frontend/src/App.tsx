@@ -1,9 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useSession } from "./context/SessionContext";
 import AppNav from "./components/AppNav";
-import Landing from "./pages/Landing";
-import StaffLogin from "./pages/StaffLogin";
-import MemberEntry from "./pages/member/MemberEntry";
+import UnifiedLogin from "./pages/UnifiedLogin";
 import Verify from "./pages/member/Verify";
 import ScreeningFlow from "./pages/member/ScreeningFlow";
 import Queue from "./pages/care-manager/Queue";
@@ -14,12 +12,12 @@ import Security from "./pages/Security";
 
 function RequireStaff({ children }: { children: JSX.Element }) {
   const { staff } = useSession();
-  return staff ? children : <Navigate to="/login" replace />;
+  return staff ? children : <Navigate to="/" replace />;
 }
 
 function RequireMember({ children }: { children: JSX.Element }) {
   const { member } = useSession();
-  return member ? children : <Navigate to="/start" replace />;
+  return member ? children : <Navigate to="/" replace />;
 }
 
 function StaffPage({ children, wide = false }: { children: JSX.Element; wide?: boolean }) {
@@ -36,9 +34,9 @@ function StaffPage({ children, wide = false }: { children: JSX.Element; wide?: b
 export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<Landing />} />
-      <Route path="/login" element={<StaffLogin />} />
-      <Route path="/start" element={<MemberEntry />} />
+      <Route path="/" element={<UnifiedLogin />} />
+      <Route path="/login" element={<Navigate to="/" replace />} />
+      <Route path="/start" element={<Navigate to="/" replace />} />
       <Route path="/verify" element={<Verify />} />
       <Route
         path="/screening"
