@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+###############################################################################
+# Clean bootstrap for the LIVE cogai-payor.com stack + USFHP/SVMC demo tenant.
+#
+# The production DB was deployed with DEV_MODE=false, so the demo seed never ran
+# and NO staff accounts exist. This script:
+#   1. Runs a one-off Fargate task that creates a strong-password SUPERADMIN
+#      directly in the private Aurora DB (no dev-mode, no weak default).
+#   2. Logs in as that superadmin and creates the "USFHP - St. Vincent's" tenant
+#      (all measures enabled) with its own payer-admin login.
+#   3. Uploads the USFHP demo roster (members + dependents); care gaps auto-open.
+#
+# Run it once from your terminal:
+#   bash demo/bootstrap_and_create_usfhp.sh
+#
+# Requires: awscli logged in (acct 381491941721), python3, curl.  ~2-3 min.
+###############################################################################
+set -euo pipefail
+
+REGION=us-east-1
+CLUSTER=hedis-care-gap-cluster
+TASKDEF=hedis-care-gap:4
+CONTAINER=backend
+SUBNETS='["subnet-0de8ee128cc98d50a","subnet-0834bfda4a707fd1b"]'
+SG='["sg-08fb0adc014162781"]'
+API=https://api.cogai-payor.com
+ROSTER="$(cd "$(dirname "$0")" && pwd)/usfhp_roster.csv"
+
+# --- credentials generated locally, shown only to you at the end ------------
+SU_EMAIL="superadmin@cogai-payor.com"
+SU_PW="CogAiSuper-$(openssl rand -hex 6)"
+ADMIN_EMAIL="admin@usfhp-svmc.demo"
+ADMIN_PW="USFHP-demo-$(openssl rand -hex 4)"
+
+echo "==> 1/4  Launching one-off task to create superadmin ($SU_EMAIL)"
+OVERRIDES=$(python3 - "$SU_EMAIL" "$SU_PW" <<'PY'
+import json, sys
+email, pw = sys.argv[1], sys.argv[2]
+script = (
+"import asyncio\n"
+"from sqlalchemy import select\n"
+"from app.db import SessionLocal, init_db\n"
+"from app.models import StaffUser, StaffRole\n"
+"from app.security import hash_password\n"
+f"EMAIL={email!r}\nPW={pw!r}\n"
+"async def main():\n"
+"    await init_db()\n"
+"    async with SessionLocal() as db:\n"
+"        ex=(await db.execute(select(StaffUser).where(StaffUser.email==EMAIL))).scalar_one_or_none()\n"
+"        if ex: print('SUPERADMIN_EXISTS'); return\n"
+"        db.add(StaffUser(tenant_id=None,email=EMAIL,password_hash=hash_password(PW),role=StaffRole.super_admin.value,name='Platform Super Admin'))\n"
+"        await db.commit(); print('SUPERADMIN_CREATED')\n"
+"asyncio.run(main())\n"
+)
+print(json.dumps({"containerOverrides":[{"name":"backend","command":["python","-c",script]}]}))
+PY
+)
+
+TASK_ARN=$(aws ecs run-task --region "$REGION" --cluster "$CLUSTER" \
+  --task-definition "$TASKDEF" --launch-type FARGATE \
+  --network-configuration "awsvpcConfiguration={subnets=$SUBNETS,securityGroups=$SG,assignPublicIp=DISABLED}" \
+  --overrides "$OVERRIDES" \
+  --query "tasks[0].taskArn" --output text)
+echo "    task: $TASK_ARN"
+echo "    waiting for it to finish..."
+aws ecs wait tasks-stopped --region "$REGION" --cluster "$CLUSTER" --tasks "$TASK_ARN"
+
+# fetch the task's log to confirm
+LOGCFG=$(aws ecs describe-task-definition --region "$REGION" --task-definition "$TASKDEF" \
+  --query "taskDefinition.containerDefinitions[0].logConfiguration.options" --output json)
+LG=$(echo "$LOGCFG" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("awslogs-group",""))')
+PFX=$(echo "$LOGCFG" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("awslogs-stream-prefix",""))')
+TID=$(basename "$TASK_ARN")
+if [ -n "$LG" ]; then
+  echo "    task log:"
+  aws logs get-log-events --region "$REGION" --log-group-name "$LG" \
+    --log-stream-name "$PFX/$CONTAINER/$TID" --query "events[].message" --output text 2>/dev/null | sed 's/^/      /' || true
+fi
+
+echo "==> 2/4  Logging in as superadmin"
+SU_TOKEN=$(curl -fsS -X POST "$API/api/auth/staff/login" -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$SU_EMAIL\",\"password\":\"$SU_PW\"}" \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
+echo "    ok"
+
+echo "==> 3/4  Creating tenant usfhp-svmc + admin ($ADMIN_EMAIL)"
+MEASURES=$(curl -fsS "$API/api/tenants/measures/catalog" -H "Authorization: Bearer $SU_TOKEN" \
+  | python3 -c 'import sys,json;print(json.dumps([m["code"] for m in json.load(sys.stdin)]))')
+BODY=$(python3 - "$MEASURES" "$ADMIN_EMAIL" "$ADMIN_PW" <<'PY'
+import json,sys
+measures, ae, ap = json.loads(sys.argv[1]), sys.argv[2], sys.argv[3]
+print(json.dumps({"slug":"usfhp-svmc","name":"USFHP – St. Vincent's","primary_color":"#0a3d62",
+ "support_email":"caremgmt@usfhp-svmc.demo","enabled_measures":measures,
+ "first_admin_email":ae,"first_admin_password":ap}))
+PY
+)
+curl -fsS -X POST "$API/api/tenants" -H "Authorization: Bearer $SU_TOKEN" \
+  -H 'Content-Type: application/json' -d "$BODY" \
+  | python3 -c 'import sys,json;d=json.load(sys.stdin);print("    created:",d.get("name"),"(slug",d.get("slug")+")")'
+
+echo "==> 4/4  Uploading USFHP roster"
+AD_TOKEN=$(curl -fsS -X POST "$API/api/auth/staff/login" -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PW\"}" \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
+curl -fsS -X POST "$API/api/members/bulk-csv" -H "Authorization: Bearer $AD_TOKEN" \
+  -F "file=@$ROSTER;type=text/csv" \
+  | python3 -c 'import sys,json;d=json.load(sys.stdin);
+mk=d.get("created_members") or d.get("members") or [];
+dk=d.get("created_dependents") or d.get("dependents") or [];
+print("    members:",len(mk)," dependents:",len(dk)," errors:",len(d.get("errors",[])) if isinstance(d,dict) else 0)'
+
+cat <<EOF
+
+================  DONE  ================
+Test site:   https://usfhp-svmc.cogai-payor.com
+
+PLATFORM SUPERADMIN (keep private, rotate later):
+   $SU_EMAIL
+   $SU_PW
+
+USFHP/SVMC tenant admin (this is what the client demo uses):
+   $ADMIN_EMAIL
+   $ADMIN_PW
+========================================
+EOF
