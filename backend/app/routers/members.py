@@ -18,7 +18,16 @@ from ..measures.exclusions import (
     is_excluded,
     member_exclusion_codes,
 )
-from ..models import CareGap, Dependent, Member, MemberExclusion, StaffRole, StaffUser, TenantMeasureConfig
+from ..models import (
+    CareGap,
+    Dependent,
+    Member,
+    MemberExclusion,
+    ScreeningSubmission,
+    StaffRole,
+    StaffUser,
+    TenantMeasureConfig,
+)
 from ..schemas import (
     DependentCreate,
     DependentOut,
@@ -387,3 +396,37 @@ async def list_members(
 ):
     res = await db.execute(select(Member).where(Member.tenant_id == staff.tenant_id))
     return res.scalars().all()
+
+
+@router.get("/{member_id}/screening-history")
+async def screening_history(
+    member_id: str,
+    measure: str,
+    staff: StaffUser = Depends(
+        require_role(StaffRole.care_manager.value, StaffRole.payer_admin.value, StaffRole.super_admin.value)
+    ),
+    db: AsyncSession = Depends(get_db),
+):
+    """Chronological instrument scores for one member+measure — powers the
+    PHQ-9/GAD-7 trend chart in the care-management workspace. For mental_health,
+    `phq9`/`gad7` are the instrument totals (0–27 / 0–21); null for other measures."""
+    member = await db.get(Member, member_id)
+    if member is None or (staff.tenant_id and member.tenant_id != staff.tenant_id):
+        raise HTTPException(404, "Member not found")
+
+    rows = (
+        await db.execute(
+            select(ScreeningSubmission)
+            .where(ScreeningSubmission.member_id == member_id, ScreeningSubmission.measure_code == measure)
+            .order_by(ScreeningSubmission.submitted_at)
+        )
+    ).scalars().all()
+
+    return [
+        {
+            "date": s.submitted_at.date().isoformat(),
+            "phq9": (s.instrument_scores.get("phq9") or {}).get("total"),
+            "gad7": (s.instrument_scores.get("gad7") or {}).get("total"),
+        }
+        for s in rows
+    ]

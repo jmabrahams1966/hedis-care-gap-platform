@@ -16,7 +16,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from .crypto import EncryptedString
+from .crypto import EncryptedString, EncryptedText
 from .db import Base
 
 
@@ -453,13 +453,18 @@ class ScreeningSubmission(Base):
     care_gap: Mapped["CareGap"] = relationship(back_populates="submissions")
 
 
+# Free-text clinical note categories — kept in sync with schemas + the notes UI.
+NOTE_TYPES = {"contact", "assessment", "safety_check", "care_coordination", "other"}
+
+
 class CaseNote(Base):
     __tablename__ = "case_notes"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     care_gap_id: Mapped[str] = mapped_column(ForeignKey("care_gaps.id"), index=True)
     author_id: Mapped[str] = mapped_column(ForeignKey("staff_users.id"))
-    note: Mapped[str] = mapped_column(Text)
+    note: Mapped[str] = mapped_column(EncryptedText)  # PHI — encrypted at rest (transition-tolerant)
+    note_type: Mapped[str] = mapped_column(String(32), default="other")  # see NOTE_TYPES
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     care_gap: Mapped["CareGap"] = relationship(back_populates="notes")

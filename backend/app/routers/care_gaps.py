@@ -13,6 +13,7 @@ from ..models import (
     Dependent,
     GapStatus,
     Member,
+    NOTE_TYPES,
     NumeratorSource,
     ScreeningSubmission,
     StaffRole,
@@ -102,7 +103,7 @@ async def case_detail(
             for s in submissions
         ],
         "notes": [
-            {"id": n.id, "note": n.note, "author_id": n.author_id, "created_at": n.created_at}
+            {"id": n.id, "note": n.note, "note_type": n.note_type, "author_id": n.author_id, "created_at": n.created_at}
             for n in notes
         ],
     }
@@ -198,8 +199,11 @@ async def add_note(
     if gap is None or gap.tenant_id != staff.tenant_id:
         raise HTTPException(404, "Not found")
 
-    note = CaseNote(care_gap_id=gap.id, author_id=staff.id, note=body.note)
+    if body.note_type not in NOTE_TYPES:
+        raise HTTPException(422, "bad note_type")
+
+    note = CaseNote(care_gap_id=gap.id, author_id=staff.id, note=body.note, note_type=body.note_type)
     db.add(note)
     await db.commit()
     await db.refresh(note)
-    return {"id": note.id, "note": note.note, "created_at": note.created_at}
+    return {"id": note.id, "note": note.note, "note_type": note.note_type, "created_at": note.created_at}

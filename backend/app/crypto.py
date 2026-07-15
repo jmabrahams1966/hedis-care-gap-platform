@@ -19,7 +19,7 @@ import base64
 import hashlib
 
 from cryptography.hazmat.primitives.ciphers.aead import AESSIV
-from sqlalchemy import String
+from sqlalchemy import String, Text
 from sqlalchemy.types import TypeDecorator
 
 from .config import settings
@@ -64,6 +64,23 @@ class EncryptedString(TypeDecorator):
     filters."""
 
     impl = String
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        return None if value is None else encrypt_pii(value)
+
+    def process_result_value(self, value, dialect):
+        return None if value is None else decrypt_pii(value)
+
+
+class EncryptedText(TypeDecorator):
+    """Like EncryptedString but backed by TEXT, for unbounded free-text PHI
+    (clinical notes, care-plan/safety-plan bodies). Same deterministic AES-SIV
+    scheme and the same transition tolerance — a pre-existing plaintext value
+    decrypts to itself, so an existing TEXT column can be switched to this type
+    without migrating stored rows."""
+
+    impl = Text
     cache_ok = True
 
     def process_bind_param(self, value, dialect):

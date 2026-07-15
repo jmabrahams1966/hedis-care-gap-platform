@@ -184,6 +184,7 @@ class MemberExclusionCreate(BaseModel):
 
 class CaseNoteCreate(BaseModel):
     note: str
+    note_type: str = "other"
 
 
 class GapStatusUpdate(BaseModel):
