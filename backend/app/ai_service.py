@@ -15,6 +15,7 @@ discards it (recorded later via the outcome endpoint). Nothing here writes a not
 message, or status — the surfaces do that only after the human acts.
 """
 
+import json
 import logging
 import time
 from dataclasses import dataclass
@@ -24,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .bedrock_client import BedrockClaudeClient
 from .config import settings
 from .models import AiInteraction
+from .prompts import TRIAGE_SYSTEM
 
 logger = logging.getLogger("ai.service")
 
@@ -81,3 +83,54 @@ class AiService:
         await db.refresh(interaction)
 
         return AiResult(text=result.get("text", ""), interaction_id=interaction.id)
+
+    async def assess_risk(
+        self,
+        db: AsyncSession,
+        *,
+        text: str,
+        tenant_id: str,
+        member_id: str | None = None,
+        context: str = "",
+    ) -> dict | None:
+        """Advisory triage of a member message or screening response.
+
+        Returns {"level", "rationale", "interaction_id"} or None. **Additive and
+        best-effort by design**: returns None when AI is disabled and swallows
+        any model/parse error, so it can NEVER gate, delay, or alter the
+        deterministic 988 keyword crisis path (Feature D). That path runs first
+        and independently; this only attaches an extra signal for humans.
+        """
+        if not settings.ai_enabled:
+            return None
+        try:
+            user_text = f"{context}\n\n{text}".strip() if context else text
+            started = time.monotonic()
+            result = await self.client.complete(
+                TRIAGE_SYSTEM, [{"role": "user", "content": user_text}], model=self.model
+            )
+            latency_ms = int((time.monotonic() - started) * 1000)
+            parsed = json.loads(result.get("text", "").strip())
+            level = str(parsed.get("level", "")).lower()
+            if level not in {"low", "medium", "high"}:
+                return None
+            rationale = str(parsed.get("rationale", ""))[:500]
+
+            usage = result.get("usage", {})
+            interaction = AiInteraction(
+                tenant_id=tenant_id,
+                surface="triage",
+                actor_staff_id=None,
+                member_id=member_id,
+                model=self.model,
+                prompt_tokens=usage.get("input_tokens"),
+                completion_tokens=usage.get("output_tokens"),
+                latency_ms=latency_ms,
+                outcome="generated",
+            )
+            db.add(interaction)
+            await db.flush()  # caller owns the commit
+            return {"level": level, "rationale": rationale, "interaction_id": interaction.id}
+        except Exception:  # noqa: BLE001 — triage is best-effort; never break ingest
+            logger.exception("assess_risk failed; continuing without AI signal")
+            return None

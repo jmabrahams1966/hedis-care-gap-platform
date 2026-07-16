@@ -402,6 +402,11 @@ class CareGap(Base):
     numerator_source: Mapped[str] = mapped_column(String(32), default=NumeratorSource.unconfirmed.value)
     numerator_source_reference: Mapped[str] = mapped_column(String(255), default="")
     safety_flag: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Advisory AI triage signal from a screening submission (Feature E) —
+    # additive to safety_flag (which stays the deterministic instrument-scored
+    # flag). NULL when AI is off. Rationale may paraphrase responses → encrypted.
+    ai_risk_level: Mapped[str | None] = mapped_column(String(16), nullable=True)  # low|medium|high
+    ai_risk_rationale: Mapped[str | None] = mapped_column(EncryptedText, nullable=True)
 
     follow_up_due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     assigned_to: Mapped[str | None] = mapped_column(ForeignKey("staff_users.id"), nullable=True)
@@ -634,6 +639,11 @@ class Message(Base):
     body: Mapped[str] = mapped_column(EncryptedText)  # PHI — encrypted at rest
     delivery_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     crisis_flag: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Advisory AI triage signal (Feature E) — additive to crisis_flag, never a
+    # replacement. NULL when AI is off or triage was inconclusive. Rationale can
+    # paraphrase member text, so it's PHI and encrypted at rest.
+    ai_risk_level: Mapped[str | None] = mapped_column(String(16), nullable=True)  # low|medium|high
+    ai_risk_rationale: Mapped[str | None] = mapped_column(EncryptedText, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 

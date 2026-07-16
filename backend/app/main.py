@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .db import SessionLocal, init_db
 from .routers import (
+    ai_assist,
     auth,
     care_gaps,
     care_plan,
@@ -78,6 +79,7 @@ app.include_router(enrollments.router)
 app.include_router(sequences.router)
 app.include_router(conversations.router)
 app.include_router(conversations.member_router)
+app.include_router(ai_assist.router)
 app.include_router(webhooks.router)
 
 

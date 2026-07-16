@@ -1,9 +1,11 @@
+import json
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..ai_service import AiService
 from ..audit import log_action
 from ..cadence_service import end_enrollments_for_gap, mark_response_for_gap
 from ..db import get_db
@@ -134,6 +136,20 @@ async def submit_screening(
         # applies (e.g. BCS: hasn't been screened, doesn't want scheduling help
         # yet) — leave the gap open so normal outreach cadence keeps nudging.
         gap.status = GapStatus.open.value
+
+    # Feature E: advisory AI triage on the responses — additive to the
+    # instrument-scored safety_flag above, no-op when AI is disabled, failures
+    # swallowed. Never gates the deterministic safety flag or the gap status.
+    signal = await AiService().assess_risk(
+        db,
+        text=json.dumps(body.responses)[:4000],
+        tenant_id=member.tenant_id,
+        member_id=member.id,
+        context=f"Screening responses for measure {gap.measure_code}.",
+    )
+    if signal:
+        gap.ai_risk_level = signal["level"]
+        gap.ai_risk_rationale = signal["rationale"]
 
     # Credit this engagement to the member's most recent outreach attempt (C1).
     await mark_response_for_gap(db, gap.id, "screening_completed")

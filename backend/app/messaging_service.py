@@ -11,6 +11,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .ai_service import AiService
 from .audit import log_action
 from .config import settings
 from .crisis import AFTER_HOURS_ACK, CRISIS_AUTO_REPLY, crisis_scan, within_business_hours
@@ -93,10 +94,16 @@ async def record_inbound_message(
     body: str,
     channel: str,
     now: datetime | None = None,
+    ai: "AiService | None" = None,
 ) -> tuple[Message, str]:
     """Append an inbound member message (web or sms) and run the always-on safety
     logic: crisis → immediate 988 auto-reply + Feature B safety flag; else
-    after-hours → auto-acknowledge. Returns (message, outcome). Caller commits."""
+    after-hours → auto-acknowledge. Returns (message, outcome). Caller commits.
+
+    The deterministic keyword crisis path (below) is the safety net and runs
+    unconditionally. AI triage (Feature E) is layered on *after* it, is
+    best-effort, and is a no-op when AI is disabled — it can never change the
+    crisis handling or the returned outcome."""
     now = now or datetime.utcnow()
     msg = Message(conversation_id=conversation.id, direction="inbound", channel=channel, body=body)
     db.add(msg)
@@ -133,6 +140,17 @@ async def record_inbound_message(
             except Exception:  # noqa: BLE001
                 pass
         outcome = "after_hours_ack"
+
+    # Feature E: advisory AI triage, strictly additive. No-op when AI is off;
+    # any failure is swallowed inside assess_risk. Runs after the deterministic
+    # crisis handling above and never alters `outcome`.
+    ai = ai or AiService()
+    signal = await ai.assess_risk(
+        db, text=body, tenant_id=conversation.tenant_id, member_id=member.id
+    )
+    if signal:
+        msg.ai_risk_level = signal["level"]
+        msg.ai_risk_rationale = signal["rationale"]
 
     return msg, outcome
 
