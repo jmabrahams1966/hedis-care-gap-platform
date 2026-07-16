@@ -70,6 +70,29 @@ async def inbox(
     return [await _summary(db, c) for c in rows]
 
 
+@router.get("/by-member/{member_id}")
+async def thread_by_member(
+    member_id: str,
+    staff: StaffUser = Depends(require_role(*_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """The member's thread for the case-workspace Messages panel — creates the
+    conversation on first open."""
+    member = await db.get(Member, member_id)
+    if member is None or member.tenant_id != staff.tenant_id:
+        raise HTTPException(404, "Member not found")
+    c = await get_or_create_conversation(db, member)
+    msgs = (
+        await db.execute(
+            select(Message).where(Message.conversation_id == c.id).order_by(Message.created_at.asc())
+        )
+    ).scalars().all()
+    if c.staff_unread:
+        c.staff_unread = False
+    await db.commit()
+    return {"conversation": await _summary(db, c), "messages": [_msg(m) for m in msgs]}
+
+
 async def _load(db: AsyncSession, staff: StaffUser, conversation_id: str) -> Conversation:
     c = await db.get(Conversation, conversation_id)
     if c is None or c.tenant_id != staff.tenant_id:

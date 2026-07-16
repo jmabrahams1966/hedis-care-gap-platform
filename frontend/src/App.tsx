@@ -4,6 +4,8 @@ import AppNav from "./components/AppNav";
 import UnifiedLogin from "./pages/UnifiedLogin";
 import Verify from "./pages/member/Verify";
 import ScreeningFlow from "./pages/member/ScreeningFlow";
+import MessageCenter from "./pages/member/MessageCenter";
+import Inbox from "./pages/care-manager/Inbox";
 import Overview from "./pages/care-manager/Overview";
 import Queue from "./pages/care-manager/Queue";
 import CaseDetail from "./pages/care-manager/CaseDetail";
@@ -50,6 +52,14 @@ export default function App() {
         }
       />
       <Route
+        path="/messages"
+        element={
+          <RequireMember>
+            <MessageCenter />
+          </RequireMember>
+        }
+      />
+      <Route
         path="/overview"
         element={
           <StaffPage wide>
@@ -62,6 +72,14 @@ export default function App() {
         element={
           <StaffPage wide>
             <Queue />
+          </StaffPage>
+        }
+      />
+      <Route
+        path="/inbox"
+        element={
+          <StaffPage wide>
+            <Inbox />
           </StaffPage>
         }
       />

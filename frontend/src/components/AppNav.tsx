@@ -24,6 +24,7 @@ export default function AppNav() {
   }
   if (staff?.role === "care_manager" || staff?.role === "payer_admin" || staff?.role === "super_admin") {
     links.push({ to: "/queue", label: "Care Gap Queue" });
+    links.push({ to: "/inbox", label: "Messages" });
   }
   if (staff?.role === "payer_admin" || staff?.role === "super_admin") {
     links.push({ to: "/admin/measures", label: "Measures" });

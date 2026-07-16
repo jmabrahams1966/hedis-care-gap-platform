@@ -25,9 +25,12 @@ export default function Verify() {
     try {
       const res = await api.post<{ token: string; first_name: string }>("/api/auth/member/verify", { token });
       setMember({ token: res.token, firstName: res.first_name });
-      // Carry the outreach's target measure through so the check-in opens it first.
+      // A secure-message notification link lands the member in the message center;
+      // otherwise carry the outreach's target measure through to the check-in.
+      const next = params.get("next");
       const focus = params.get("focus");
-      navigate(focus ? `/screening?focus=${focus}` : "/screening", { replace: true });
+      if (next === "messages") navigate("/messages", { replace: true });
+      else navigate(focus ? `/screening?focus=${focus}` : "/screening", { replace: true });
     } catch (err) {
       setStatus("error");
       setError(err instanceof ApiError ? err.message : "This link is invalid or expired — please request a new one.");
