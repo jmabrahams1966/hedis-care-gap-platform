@@ -139,6 +139,13 @@ db_min_capacity = 0.5
 db_max_capacity = 4
 desired_count   = 2
 outreach_cron_schedule = "rate(1 day)"
+
+# Feature E (KaveraChat AI assist). Defaults keep it dormant; omit these lines
+# to ship dormant. To activate: set ai_enabled = true, apply, then rebuild the
+# frontend with VITE_FEATURE_AI=true. The bedrock:InvokeModel task-role grant
+# applies regardless (unused while dormant).
+ai_enabled       = false
+bedrock_model_id = "us.anthropic.claude-sonnet-4-20250514-v1:0"
 ```
 
 ### Terraform validation (already done, in a sandboxed session)

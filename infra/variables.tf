@@ -94,6 +94,22 @@ variable "sms_origination_phone" {
   default     = ""
 }
 
+# KaveraChat AI assist (Feature E). Ships dormant: with ai_enabled=false the AI
+# endpoints return 503 and no PHI reaches Bedrock. Flip to true (and rebuild the
+# frontend with VITE_FEATURE_AI=true) to activate. The bedrock:InvokeModel grant
+# on the task role is applied regardless — it's unused while dormant.
+variable "ai_enabled" {
+  description = "Enable KaveraChat AI assist (Feature E). false = dormant (endpoints return 503)."
+  type        = bool
+  default     = false
+}
+
+variable "bedrock_model_id" {
+  description = "Bedrock model/inference-profile id for AI assist. Anthropic models only (the task-role grant is scoped to anthropic.*)."
+  type        = string
+  default     = "us.anthropic.claude-sonnet-4-20250514-v1:0"
+}
+
 variable "outreach_cron_schedule" {
   description = "EventBridge Scheduler expression for the outreach batch job (see backend/app/scripts/run_outreach_cron.py)"
   type        = string

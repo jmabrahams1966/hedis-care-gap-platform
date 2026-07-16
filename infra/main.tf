@@ -78,6 +78,8 @@ module "ecs" {
     SMS_CONFIGURATION_SET    = module.messaging.configuration_set_name
     KMS_KEY_ARN              = module.secrets.kms_key_arn
     AUDIT_ARCHIVE_BUCKET     = module.audit.bucket_name
+    AI_ENABLED               = tostring(var.ai_enabled)
+    BEDROCK_MODEL_ID         = var.bedrock_model_id
   }
 }
 
