@@ -27,6 +27,8 @@ async def send_to_member(
     gap: CareGap,
     template_override: str | None = None,
     channel_override: str | None = None,
+    sequence_id: str | None = None,
+    step_order: int | None = None,
 ) -> OutreachAttempt:
     """Send one outreach to a member for a gap. `template_override` /
     `channel_override` let the cadence engine (Feature C1) drive a specific
@@ -86,6 +88,8 @@ async def send_to_member(
         status=OutreachStatus.sent.value if message_id else OutreachStatus.failed.value,
         provider_message_id=message_id,
         error="" if message_id else (error or "delivery not confirmed"),
+        sequence_id=sequence_id,
+        step_order=step_order,
     )
     db.add(attempt)
     return attempt

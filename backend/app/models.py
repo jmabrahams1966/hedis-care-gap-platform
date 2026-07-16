@@ -436,6 +436,12 @@ class OutreachAttempt(Base):
     provider_message_id: Mapped[str] = mapped_column(String(255), default="")
     error: Mapped[str] = mapped_column(String(500), default="")
     sent_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    # Cadence provenance (Feature C1) — null for standard retry-batch attempts.
+    sequence_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    step_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Response tracking (Feature C1) — set when the member engages after an attempt.
+    responded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    response_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     care_gap: Mapped["CareGap"] = relationship(back_populates="outreach_attempts")
 

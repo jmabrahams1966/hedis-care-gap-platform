@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..audit import log_action
+from ..cadence_service import end_enrollments_for_gap, mark_response_for_gap
 from ..db import get_db
 from ..deps import client_ip, get_current_member
 from ..measures import REGISTRY, get_measure
@@ -127,11 +128,15 @@ async def submit_screening(
         gap.status = GapStatus.completed.value
         gap.closed_at = datetime.utcnow()
         gap.closure_reason = "numerator_met"
+        await end_enrollments_for_gap(db, gap.id, "numerator_met")  # stop cadence — member's done
     else:
         # Member responded but the numerator isn't met and no follow-up window
         # applies (e.g. BCS: hasn't been screened, doesn't want scheduling help
         # yet) — leave the gap open so normal outreach cadence keeps nudging.
         gap.status = GapStatus.open.value
+
+    # Credit this engagement to the member's most recent outreach attempt (C1).
+    await mark_response_for_gap(db, gap.id, "screening_completed")
 
     await log_action(
         db,

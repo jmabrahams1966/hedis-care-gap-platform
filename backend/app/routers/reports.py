@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -5,7 +7,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_db
 from ..deps import require_role
 from ..measures import get_measure
-from ..models import CareGap, GapStatus, Measure, Member, NumeratorSource, StaffRole, StaffUser, Tenant
+from ..models import (
+    CareGap,
+    GapStatus,
+    Measure,
+    Member,
+    NumeratorSource,
+    OutreachAttempt,
+    OutreachSequence,
+    StaffRole,
+    StaffUser,
+    Tenant,
+)
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 
@@ -56,6 +69,73 @@ async def hedis_rate(
         "numerator": numerator,
         "rate": rate,
         "open_follow_ups": follow_up_due,
+    }
+
+
+@router.get("/outreach")
+async def outreach_report(
+    period: str,
+    tenant: str | None = None,
+    staff: StaffUser = Depends(require_role(StaffRole.payer_admin.value, StaffRole.super_admin.value)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Outreach effectiveness for the period, grouped by sequence · step · channel:
+    how many attempts were sent and how many earned a member response. Cadence
+    attempts carry a sequence; standard retry-batch attempts group under 'Ad-hoc'."""
+    tenant_id = staff.tenant_id
+    if tenant_id is None:
+        if not tenant:
+            raise HTTPException(400, "super_admin must pass ?tenant=<slug>")
+        row = (await db.execute(select(Tenant).where(Tenant.slug == tenant))).scalar_one_or_none()
+        if row is None:
+            raise HTTPException(404, "Tenant not found")
+        tenant_id = row.id
+
+    year = int(period)
+    start, end = datetime(year, 1, 1), datetime(year + 1, 1, 1)
+    rows = (
+        await db.execute(
+            select(OutreachAttempt)
+            .join(CareGap, CareGap.id == OutreachAttempt.care_gap_id)
+            .where(CareGap.tenant_id == tenant_id, OutreachAttempt.sent_at >= start, OutreachAttempt.sent_at < end)
+        )
+    ).scalars().all()
+
+    names = dict((await db.execute(select(OutreachSequence.id, OutreachSequence.name))).all())
+
+    groups: dict[tuple, dict] = {}
+    for a in rows:
+        key = (a.sequence_id, a.step_order, a.channel)
+        g = groups.setdefault(key, {"sent": 0, "responded": 0})
+        g["sent"] += 1
+        if a.responded_at is not None:
+            g["responded"] += 1
+
+    out = []
+    for (seq_id, step_order, channel), g in groups.items():
+        out.append(
+            {
+                "sequence_id": seq_id,
+                "sequence_name": names.get(seq_id, "Ad-hoc / retry") if seq_id else "Ad-hoc / retry",
+                "step_order": step_order,
+                "channel": channel,
+                "sent": g["sent"],
+                "responded": g["responded"],
+                "response_rate": round(g["responded"] / g["sent"], 4) if g["sent"] else 0.0,
+            }
+        )
+    out.sort(key=lambda r: (r["sequence_name"], r["step_order"] if r["step_order"] is not None else -1, r["channel"]))
+
+    total_sent = sum(r["sent"] for r in out)
+    total_responded = sum(r["responded"] for r in out)
+    return {
+        "period": period,
+        "totals": {
+            "sent": total_sent,
+            "responded": total_responded,
+            "response_rate": round(total_responded / total_sent, 4) if total_sent else 0.0,
+        },
+        "rows": out,
     }
 
 

@@ -15,8 +15,10 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import CareGap, Member, SequenceEnrollment, SequenceStep, Tenant
+from .models import CareGap, Member, OutreachAttempt, SequenceEnrollment, SequenceStep, Tenant
 from .outreach_service import send_to_member
+
+RESPONSE_WINDOW_DAYS = 14
 
 
 def _consent_ok(member: Member, channel: str) -> bool:
@@ -79,6 +81,30 @@ async def end_active_enrollments_for_member(db: AsyncSession, member_id: str, re
     return len(rows)
 
 
+async def mark_response_for_gap(db: AsyncSession, care_gap_id: str, response_type: str) -> bool:
+    """Attribute a member response to the most recent unresponded outreach attempt
+    for a gap (within the response window) — powers the outreach-effectiveness
+    report. No-op if there's no recent attempt to credit."""
+    now = datetime.utcnow()
+    cutoff = now - timedelta(days=RESPONSE_WINDOW_DAYS)
+    attempt = (
+        await db.execute(
+            select(OutreachAttempt)
+            .where(
+                OutreachAttempt.care_gap_id == care_gap_id,
+                OutreachAttempt.responded_at.is_(None),
+                OutreachAttempt.sent_at >= cutoff,
+            )
+            .order_by(OutreachAttempt.sent_at.desc())
+        )
+    ).scalars().first()
+    if attempt is None:
+        return False
+    attempt.responded_at = now
+    attempt.response_type = response_type
+    return True
+
+
 async def process_due(db: AsyncSession, now: datetime | None = None) -> dict:
     now = now or datetime.utcnow()
     enrolls = (
@@ -101,7 +127,14 @@ async def process_due(db: AsyncSession, now: datetime | None = None) -> dict:
         if member is not None and gap is not None and _consent_ok(member, step.channel):
             tenant = await db.get(Tenant, e.tenant_id)
             attempt = await send_to_member(
-                db, tenant, member, gap, template_override=step.template_key, channel_override=step.channel
+                db,
+                tenant,
+                member,
+                gap,
+                template_override=step.template_key,
+                channel_override=step.channel,
+                sequence_id=e.sequence_id,
+                step_order=step.step_order,
             )
             if attempt.status == "sent":
                 sent += 1
