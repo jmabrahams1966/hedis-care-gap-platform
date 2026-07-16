@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..audit import log_action
+from ..cadence_service import end_active_enrollments_for_member
 from ..db import get_db
 from ..models import Member
 from ..notifications.sns_verify import confirm_subscription, verify_sns_signature
@@ -57,6 +58,8 @@ async def sms_inbound(request: Request, db: AsyncSession = Depends(get_db)):
     if text in STOP_KEYWORDS:
         member.consent_sms = False
         member.consent_recorded_at = datetime.utcnow()
+        # A member who opted out should not keep receiving cadence outreach.
+        await end_active_enrollments_for_member(db, member.id, "opt_out")
         await log_action(
             db,
             actor_type="member",

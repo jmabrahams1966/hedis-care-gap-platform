@@ -48,6 +48,37 @@ async def _next_step(db: AsyncSession, sequence_id: str, after: int) -> Sequence
     ).scalars().first()
 
 
+async def end_enrollments_for_gap(db: AsyncSession, care_gap_id: str, reason: str) -> int:
+    """End every active/paused enrollment tied to a care gap — used when the gap
+    is closed/excluded/numerator-met so we stop chasing a member who's done."""
+    rows = (
+        await db.execute(
+            select(SequenceEnrollment).where(
+                SequenceEnrollment.care_gap_id == care_gap_id,
+                SequenceEnrollment.status.in_(["active", "paused"]),
+            )
+        )
+    ).scalars().all()
+    for e in rows:
+        e.status, e.ended_reason = "ended", reason
+    return len(rows)
+
+
+async def end_active_enrollments_for_member(db: AsyncSession, member_id: str, reason: str) -> int:
+    """End all of a member's active/paused enrollments — used on opt-out (STOP)."""
+    rows = (
+        await db.execute(
+            select(SequenceEnrollment).where(
+                SequenceEnrollment.member_id == member_id,
+                SequenceEnrollment.status.in_(["active", "paused"]),
+            )
+        )
+    ).scalars().all()
+    for e in rows:
+        e.status, e.ended_reason = "ended", reason
+    return len(rows)
+
+
 async def process_due(db: AsyncSession, now: datetime | None = None) -> dict:
     now = now or datetime.utcnow()
     enrolls = (

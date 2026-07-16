@@ -5,6 +5,7 @@ from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..audit import log_action
+from ..cadence_service import end_enrollments_for_gap
 from ..db import get_db
 from ..deps import client_ip, require_role
 from ..models import (
@@ -130,6 +131,7 @@ async def update_status(
     if body.status in (GapStatus.closed.value, GapStatus.excluded.value):
         gap.closed_at = datetime.utcnow()
         gap.closure_reason = body.reason.strip() or "closed_by_staff"
+        await end_enrollments_for_gap(db, gap.id, "gap_closed")  # stop chasing a resolved gap
     else:
         gap.closed_at = None
         gap.closure_reason = ""
@@ -173,6 +175,7 @@ async def confirm_numerator(
         gap.status = GapStatus.completed.value
         gap.closed_at = datetime.utcnow()
         gap.closure_reason = "numerator_met_claims_confirmed"
+        await end_enrollments_for_gap(db, gap.id, "numerator_met")
 
     await log_action(
         db,

@@ -10,6 +10,7 @@ from .routers import (
     care_gaps,
     care_plan,
     dependents,
+    enrollments,
     maternity,
     medications,
     members,
@@ -71,6 +72,7 @@ app.include_router(reports.router)
 app.include_router(tasks.router)
 app.include_router(care_plan.router)
 app.include_router(safety.router)
+app.include_router(enrollments.router)
 app.include_router(webhooks.router)
 
 
