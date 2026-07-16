@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     # after FIRST use, the same token re-issues the same member's session instead
     # of erroring; after it, the link is spent. Measured from first use and never
     # extended, so repeated hits can't hold the window open.
-    magic_reuse_grace_minutes: int = 10
+    magic_reuse_grace_minutes: int = 60
 
     dev_mode: bool = True
     cors_origins: str = "http://localhost:5173"
