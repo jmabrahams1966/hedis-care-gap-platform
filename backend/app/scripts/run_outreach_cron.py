@@ -15,6 +15,7 @@ import sys
 
 from sqlalchemy import select
 
+from ..cadence_service import process_due
 from ..db import SessionLocal
 from ..models import Tenant
 from ..outreach_service import run_batch_for_tenant
@@ -31,6 +32,10 @@ async def main() -> int:
             result = await run_batch_for_tenant(db, tenant)
             logger.info("tenant=%s evaluated=%d sent=%d", tenant.slug, result["evaluated"], result["sent"])
             total_sent += result["sent"]
+        # Feature C1: advance any due multi-step cadence enrollments (all tenants).
+        cadence = await process_due(db)
+        logger.info("cadence: evaluated=%d sent=%d", cadence["evaluated"], cadence["sent"])
+        total_sent += cadence["sent"]
         logger.info("outreach cron complete: %d tenants, %d messages sent", len(tenants), total_sent)
     return 0
 

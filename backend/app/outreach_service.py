@@ -20,7 +20,18 @@ from .security import generate_magic_token, magic_token_expiry
 RETRY_CADENCE_DAYS = 7
 
 
-async def send_to_member(db: AsyncSession, tenant: Tenant, member: Member, gap: CareGap) -> OutreachAttempt:
+async def send_to_member(
+    db: AsyncSession,
+    tenant: Tenant,
+    member: Member,
+    gap: CareGap,
+    template_override: str | None = None,
+    channel_override: str | None = None,
+) -> OutreachAttempt:
+    """Send one outreach to a member for a gap. `template_override` /
+    `channel_override` let the cadence engine (Feature C1) drive a specific
+    step's template + channel; both default to the measure/member-preference
+    behavior used by the standard retry batch."""
     raw_token, token_hash = generate_magic_token()
     db.add(
         MagicToken(member_id=member.id, token_hash=token_hash, purpose="screening", expires_at=magic_token_expiry())
@@ -33,13 +44,17 @@ async def send_to_member(db: AsyncSession, tenant: Tenant, member: Member, gap: 
     # reminder / pre- or postnatal reminder). Falls back to the screening invite
     # for anything unrecognized.
     measure = REGISTRY.get(gap.measure_code)
-    template_code = getattr(measure, "outreach_template", "screening_invite")
+    template_code = template_override or getattr(measure, "outreach_template", "screening_invite")
     tpl = OUTREACH_TEMPLATES.get(template_code, OUTREACH_TEMPLATES["screening_invite"])
 
-    # Best-effort delivery: try the member's preferred channel, fall back to email
-    # if SMS is unavailable/unconfigured, and never let a provider error crash the
-    # batch — record a failed attempt for the queue instead.
-    prefers_sms = member.preferred_channel == "sms" and member.consent_sms and bool(member.phone)
+    # Best-effort delivery: try the preferred channel (a cadence step may force
+    # sms/email; otherwise use the member's preference), fall back to email if SMS
+    # is unavailable/unconfigured, and never let a provider error crash the batch —
+    # record a failed attempt for the queue instead.
+    if channel_override in ("sms", "email"):
+        prefers_sms = channel_override == "sms" and member.consent_sms and bool(member.phone)
+    else:
+        prefers_sms = member.preferred_channel == "sms" and member.consent_sms and bool(member.phone)
     can_email = bool(member.consent_email and member.email)
     channel, message_id, error = "", "", ""
 

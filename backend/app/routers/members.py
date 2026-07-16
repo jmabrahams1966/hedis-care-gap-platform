@@ -1,7 +1,7 @@
 import csv
 import hashlib
 import io
-from datetime import date
+from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from pydantic import ValidationError
@@ -24,6 +24,8 @@ from ..models import (
     Member,
     MemberExclusion,
     ScreeningSubmission,
+    SequenceEnrollment,
+    SequenceStep,
     StaffRole,
     StaffUser,
     TenantMeasureConfig,
@@ -53,6 +55,33 @@ async def _enabled_measure_configs(db: AsyncSession, tenant_id: str) -> list[Ten
             )
         )
     ).scalars().all()
+
+
+async def _maybe_enroll_cadence(db: AsyncSession, gap: CareGap, config: TenantMeasureConfig) -> None:
+    """When a gap opens for a measure that has an outreach sequence assigned,
+    start a SequenceEnrollment at the first step (Feature C1)."""
+    if not config.sequence_id:
+        return
+    first = (
+        await db.execute(
+            select(SequenceStep)
+            .where(SequenceStep.sequence_id == config.sequence_id)
+            .order_by(SequenceStep.step_order.asc())
+        )
+    ).scalars().first()
+    if first is None:
+        return
+    db.add(
+        SequenceEnrollment(
+            tenant_id=gap.tenant_id,
+            member_id=gap.member_id,
+            care_gap_id=gap.id,
+            sequence_id=config.sequence_id,
+            status="active",
+            current_step_order=first.step_order,
+            next_send_at=datetime.utcnow() + timedelta(days=first.offset_days),
+        )
+    )
 
 
 async def _open_care_gaps_for_member(db: AsyncSession, member: Member) -> None:
@@ -87,14 +116,15 @@ async def _open_care_gaps_for_member(db: AsyncSession, member: Member) -> None:
             )
         ).scalar_one_or_none()
         if existing is None:
-            db.add(
-                CareGap(
-                    tenant_id=member.tenant_id,
-                    member_id=member.id,
-                    measure_code=config.measure_code,
-                    period=period,
-                )
+            gap = CareGap(
+                tenant_id=member.tenant_id,
+                member_id=member.id,
+                measure_code=config.measure_code,
+                period=period,
             )
+            db.add(gap)
+            await db.flush()  # need gap.id to attach a cadence enrollment
+            await _maybe_enroll_cadence(db, gap, config)
 
 
 async def _open_care_gaps_for_dependent(db: AsyncSession, dependent: Dependent) -> None:

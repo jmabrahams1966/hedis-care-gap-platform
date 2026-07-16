@@ -111,6 +111,9 @@ class TenantMeasureConfig(Base):
     measure_code: Mapped[str] = mapped_column(ForeignKey("measures.code"), index=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     config: Mapped[dict] = mapped_column(JSON, default=dict)  # per-tenant overrides (cadence, thresholds)
+    sequence_id: Mapped[str | None] = mapped_column(
+        ForeignKey("outreach_sequences.id"), nullable=True
+    )  # outreach cadence assigned to this measure (Feature C1)
 
     tenant: Mapped["Tenant"] = relationship(back_populates="measure_configs")
     measure: Mapped["Measure"] = relationship()
@@ -542,6 +545,57 @@ class EscalationStep(Base):
     completed: Mapped[bool] = mapped_column(Boolean, default=False)
     completed_by: Mapped[str | None] = mapped_column(ForeignKey("staff_users.id"), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class OutreachSequence(Base):
+    """A reusable outreach cadence (ordered steps). tenant_id NULL = a platform
+    template readable by every tenant (copy-on-edit)."""
+
+    __tablename__ = "outreach_sequences"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    tenant_id: Mapped[str | None] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("staff_users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    steps: Mapped[list["SequenceStep"]] = relationship(
+        back_populates="sequence", cascade="all, delete-orphan"
+    )
+
+
+class SequenceStep(Base):
+    __tablename__ = "sequence_steps"
+    __table_args__ = (UniqueConstraint("sequence_id", "step_order", name="uq_seq_step_order"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    sequence_id: Mapped[str] = mapped_column(ForeignKey("outreach_sequences.id"), index=True)
+    step_order: Mapped[int] = mapped_column(Integer)
+    offset_days: Mapped[int] = mapped_column(Integer)
+    channel: Mapped[str] = mapped_column(String(16))  # sms | email | member_preferred
+    template_key: Mapped[str] = mapped_column(String(64))
+    recurring: Mapped[bool] = mapped_column(Boolean, default=False)
+    repeat_interval_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    sequence: Mapped["OutreachSequence"] = relationship(back_populates="steps")
+
+
+class SequenceEnrollment(Base):
+    __tablename__ = "sequence_enrollments"
+    __table_args__ = (Index("ix_enroll_due", "status", "next_send_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    member_id: Mapped[str] = mapped_column(ForeignKey("members.id"), index=True)
+    care_gap_id: Mapped[str | None] = mapped_column(ForeignKey("care_gaps.id"), nullable=True)
+    sequence_id: Mapped[str] = mapped_column(ForeignKey("outreach_sequences.id"))
+    status: Mapped[str] = mapped_column(String(16), default="active")  # active | paused | ended
+    current_step_order: Mapped[int] = mapped_column(Integer, default=0)
+    next_send_at: Mapped[datetime] = mapped_column(DateTime)
+    ended_by: Mapped[str | None] = mapped_column(ForeignKey("staff_users.id"), nullable=True)
+    ended_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class AuditLog(Base):
