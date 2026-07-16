@@ -9,6 +9,7 @@ from .routers import (
     auth,
     care_gaps,
     care_plan,
+    conversations,
     dependents,
     enrollments,
     maternity,
@@ -75,6 +76,7 @@ app.include_router(care_plan.router)
 app.include_router(safety.router)
 app.include_router(enrollments.router)
 app.include_router(sequences.router)
+app.include_router(conversations.router)
 app.include_router(webhooks.router)
 
 

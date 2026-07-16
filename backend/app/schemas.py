@@ -245,6 +245,14 @@ class MeasureSequenceAssign(BaseModel):
     sequence_id: str | None = None
 
 
+class MessageSend(BaseModel):
+    body: str
+
+
+class ConversationAssign(BaseModel):
+    staff_id: str | None = None  # None → assign to self
+
+
 class GapStatusUpdate(BaseModel):
     status: str
     reason: str = ""

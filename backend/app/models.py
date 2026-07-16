@@ -604,6 +604,39 @@ class SequenceEnrollment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class Conversation(Base):
+    """One secure-messaging thread per member (care team ↔ member). Message
+    bodies are PHI and never leave over SMS/email — only a notification with a
+    magic-link does (Feature D)."""
+
+    __tablename__ = "conversations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    member_id: Mapped[str] = mapped_column(ForeignKey("members.id"), unique=True, index=True)
+    assigned_staff_id: Mapped[str | None] = mapped_column(ForeignKey("staff_users.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="open")  # open | snoozed | closed
+    crisis_flag: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_message_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    staff_unread: Mapped[bool] = mapped_column(Boolean, default=False)
+    member_unread: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class Message(Base):
+    __tablename__ = "messages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id"), index=True)
+    direction: Mapped[str] = mapped_column(String(16))  # inbound | outbound
+    channel: Mapped[str] = mapped_column(String(16))  # web | sms | email
+    sender_staff_id: Mapped[str | None] = mapped_column(ForeignKey("staff_users.id"), nullable=True)
+    body: Mapped[str] = mapped_column(EncryptedText)  # PHI — encrypted at rest
+    delivery_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    crisis_flag: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class AuditLog(Base):
     """Append-only access/action log — required for HIPAA audit controls."""
 
