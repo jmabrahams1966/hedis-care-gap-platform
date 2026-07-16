@@ -7,6 +7,7 @@ import MhTrendChart from "./MhTrendChart";
 import ClinicalNotes, { type CaseNote } from "./ClinicalNotes";
 import TaskList from "./TaskList";
 import CarePlan from "./CarePlan";
+import SafetyPanel from "./SafetyPanel";
 
 interface InstrumentScore {
   total: number;
@@ -338,8 +339,8 @@ export default function CaseDetail() {
               )}
             </div>
           </div>
+          {data.safety_flag && <SafetyPanel memberId={data.member_id} careGapId={data.id} />}
           <TaskList memberId={data.member_id} careGapId={data.id} />
-          {/* safety slot — Feature B Phase 4 */}
         </div>
       </div>
     </>

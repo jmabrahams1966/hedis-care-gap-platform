@@ -509,6 +509,41 @@ class CarePlanGoal(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class SafetyPlan(Base):
+    """A member's safety plan (one active per member). All sections are free-text
+    PHI, encrypted at rest."""
+
+    __tablename__ = "safety_plans"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    member_id: Mapped[str] = mapped_column(ForeignKey("members.id"), unique=True, index=True)
+    warning_signs: Mapped[str] = mapped_column(EncryptedText, default="")       # PHI — encrypted
+    coping_strategies: Mapped[str] = mapped_column(EncryptedText, default="")   # PHI — encrypted
+    support_contacts: Mapped[str] = mapped_column(EncryptedText, default="")    # PHI — encrypted
+    means_restriction: Mapped[str] = mapped_column(EncryptedText, default="")   # PHI — encrypted
+    notes: Mapped[str] = mapped_column(EncryptedText, default="")               # PHI — encrypted
+    updated_by: Mapped[str] = mapped_column(ForeignKey("staff_users.id"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class EscalationStep(Base):
+    """One completed/uncompleted step of a care gap's crisis-escalation protocol.
+    `step_key` is drawn from the fixed protocol list in routers/safety.py, which
+    is a placeholder pending clinical sign-off (see docs/HEDIS_COMPLIANCE.md)."""
+
+    __tablename__ = "escalation_steps"
+    __table_args__ = (UniqueConstraint("care_gap_id", "step_key", name="uq_gap_step"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    care_gap_id: Mapped[str] = mapped_column(ForeignKey("care_gaps.id"), index=True)
+    step_key: Mapped[str] = mapped_column(String(64))
+    completed: Mapped[bool] = mapped_column(Boolean, default=False)
+    completed_by: Mapped[str | None] = mapped_column(ForeignKey("staff_users.id"), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class AuditLog(Base):
     """Append-only access/action log — required for HIPAA audit controls."""
 

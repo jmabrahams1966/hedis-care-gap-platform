@@ -101,3 +101,47 @@ export const createGoal = (
 
 export const updateGoal = (goalId: string, status: CarePlanGoal["status"], token?: string | null) =>
   api.patch<CarePlanGoal>(`/api/care-plan/${goalId}`, { status }, token);
+
+// --- Safety plan + escalation (Feature B Phase 4) ---
+
+export interface SafetyPlanSections {
+  warning_signs: string;
+  coping_strategies: string;
+  support_contacts: string;
+  means_restriction: string;
+  notes: string;
+  updated_at: string | null;
+}
+
+export interface EscalationStep {
+  step_key: string;
+  label: string;
+  completed: boolean;
+  completed_by: string | null;
+  completed_at: string | null;
+}
+
+export type SafetyPlanField = keyof Omit<SafetyPlanSections, "updated_at">;
+
+export const SAFETY_PLAN_FIELDS: { key: SafetyPlanField; label: string }[] = [
+  { key: "warning_signs", label: "Warning signs" },
+  { key: "coping_strategies", label: "Coping strategies" },
+  { key: "support_contacts", label: "Support contacts" },
+  { key: "means_restriction", label: "Means restriction" },
+  { key: "notes", label: "Notes" },
+];
+
+export const getSafetyPlan = (memberId: string, token?: string | null) =>
+  api.get<SafetyPlanSections>(`/api/members/${memberId}/safety-plan`, token);
+
+export const putSafetyPlan = (
+  memberId: string,
+  body: Omit<SafetyPlanSections, "updated_at">,
+  token?: string | null,
+) => api.put<SafetyPlanSections>(`/api/members/${memberId}/safety-plan`, body, token);
+
+export const getEscalation = (careGapId: string, token?: string | null) =>
+  api.get<EscalationStep[]>(`/api/care-gaps/${careGapId}/escalation`, token);
+
+export const toggleEscalationStep = (careGapId: string, stepKey: string, token?: string | null) =>
+  api.post<EscalationStep>(`/api/care-gaps/${careGapId}/escalation/${stepKey}`, {}, token);

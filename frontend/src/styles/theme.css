@@ -812,6 +812,45 @@ td.num {
   border-top: 1px solid var(--border);
 }
 
+/* Safety panel */
+.escalation-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+.escalation-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 14px;
+}
+.escalation-step input[type="checkbox"] {
+  width: auto;
+  margin: 2px 0 0;
+  flex-shrink: 0;
+}
+.escalation-step__label--done {
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+.safety-plan-view {
+  margin: 8px 0 0;
+}
+.safety-plan-view > div {
+  margin-bottom: 8px;
+}
+.safety-plan-view dt {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.safety-plan-view dd {
+  margin: 2px 0 0;
+  font-size: 14px;
+}
+
 @media (max-width: 860px) {
   .workspace-grid {
     grid-template-columns: 1fr;

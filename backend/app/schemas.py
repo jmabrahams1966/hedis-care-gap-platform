@@ -213,6 +213,14 @@ class CarePlanGoalUpdate(BaseModel):
     target_date: str | None = None
 
 
+class SafetyPlanUpsert(BaseModel):
+    warning_signs: str = ""
+    coping_strategies: str = ""
+    support_contacts: str = ""
+    means_restriction: str = ""
+    notes: str = ""
+
+
 class GapStatusUpdate(BaseModel):
     status: str
     reason: str = ""
