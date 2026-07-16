@@ -7,6 +7,8 @@ export interface Message {
   sender_staff_id: string | null;
   body: string;
   crisis_flag: boolean;
+  ai_risk_level?: "low" | "medium" | "high" | null;
+  ai_risk_rationale?: string | null;
   created_at: string;
 }
 

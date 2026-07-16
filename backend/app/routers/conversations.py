@@ -41,6 +41,9 @@ def _msg(m: Message) -> dict:
         "sender_staff_id": m.sender_staff_id,
         "body": m.body,
         "crisis_flag": m.crisis_flag,
+        # Advisory AI triage (Feature E) — staff-facing only; null when AI is off.
+        "ai_risk_level": m.ai_risk_level,
+        "ai_risk_rationale": m.ai_risk_rationale,
         "created_at": m.created_at,
     }
 

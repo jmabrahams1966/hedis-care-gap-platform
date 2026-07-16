@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSession } from "../../context/SessionContext";
 import MessageThread from "../../components/MessageThread";
+import { draftReply } from "../../lib/ai";
 import {
   closeConversation,
   getInbox,
@@ -115,7 +116,12 @@ export default function Inbox() {
                   <strong>Crisis flag active</strong> — a 988 auto-reply was sent and the member's safety flag was raised. Follow the escalation protocol.
                 </div>
               )}
-              <MessageThread messages={thread.messages} viewer="staff" onSend={send} />
+              <MessageThread
+                messages={thread.messages}
+                viewer="staff"
+                onSend={send}
+                onDraft={selected ? () => draftReply(selected, staff?.token) : undefined}
+              />
             </>
           )}
         </div>

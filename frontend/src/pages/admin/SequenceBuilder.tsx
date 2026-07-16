@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSession } from "../../context/SessionContext";
 import { MEASURE_LABELS } from "../../data/measures";
+import OutreachCopyAssistant from "./OutreachCopyAssistant";
 import {
   assignSequenceToMeasure,
   createSequence,
@@ -259,6 +260,8 @@ export default function SequenceBuilder() {
               </button>
             </div>
           )}
+
+          <OutreachCopyAssistant defaultMeasure={measure} />
         </div>
       </div>
     </div>

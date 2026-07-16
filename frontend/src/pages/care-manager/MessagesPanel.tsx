@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSession } from "../../context/SessionContext";
 import MessageThread from "../../components/MessageThread";
+import { draftReply } from "../../lib/ai";
 import { getThreadByMember, sendStaffMessage, type Thread } from "../../lib/messaging";
 
 export default function MessagesPanel({ memberId }: { memberId: string }) {
@@ -24,7 +25,12 @@ export default function MessagesPanel({ memberId }: { memberId: string }) {
       {!thread ? (
         <div className="spinner" />
       ) : (
-        <MessageThread messages={thread.messages} viewer="staff" onSend={send} />
+        <MessageThread
+          messages={thread.messages}
+          viewer="staff"
+          onSend={send}
+          onDraft={() => draftReply(thread.conversation.id, staff?.token)}
+        />
       )}
     </div>
   );
