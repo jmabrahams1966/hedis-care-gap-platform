@@ -187,6 +187,18 @@ class CaseNoteCreate(BaseModel):
     note_type: str = "other"
 
 
+class CareTaskCreate(BaseModel):
+    title: str
+    care_gap_id: str | None = None
+    due_at: datetime | None = None
+    sla_hours: int | None = None
+    assignee_staff_id: str | None = None
+
+
+class CareTaskUpdate(BaseModel):
+    status: str  # done | cancelled | open
+
+
 class GapStatusUpdate(BaseModel):
     status: str
     reason: str = ""

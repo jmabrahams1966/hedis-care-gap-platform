@@ -737,6 +737,53 @@ td.num {
   background: var(--warning);
 }
 
+/* Tasks */
+.task-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+}
+.task-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.task-row:last-child {
+  border-bottom: none;
+}
+.task-row input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+  flex-shrink: 0;
+}
+.task-row__title {
+  flex: 1;
+  font-size: 14px;
+}
+.task-row--done .task-row__title {
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+.task-add {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.task-add input[type="text"] {
+  flex: 1;
+  min-width: 120px;
+  margin-bottom: 0;
+}
+.task-add input[type="date"] {
+  width: auto;
+  margin-bottom: 0;
+}
+
 @media (max-width: 860px) {
   .workspace-grid {
     grid-template-columns: 1fr;

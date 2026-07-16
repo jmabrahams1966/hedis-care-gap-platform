@@ -15,6 +15,7 @@ from .routers import (
     outreach,
     reports,
     screenings,
+    tasks,
     tenants,
     webhooks,
 )
@@ -65,6 +66,7 @@ app.include_router(screenings.router)
 app.include_router(care_gaps.router)
 app.include_router(outreach.router)
 app.include_router(reports.router)
+app.include_router(tasks.router)
 app.include_router(webhooks.router)
 
 

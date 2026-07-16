@@ -470,6 +470,26 @@ class CaseNote(Base):
     care_gap: Mapped["CareGap"] = relationship(back_populates="notes")
 
 
+class CareTask(Base):
+    """A follow-up to-do on a member (optionally tied to a specific care gap),
+    with an optional due date / SLA — powers the tasks panel and overdue rollup."""
+
+    __tablename__ = "care_tasks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    member_id: Mapped[str] = mapped_column(ForeignKey("members.id"), index=True)
+    care_gap_id: Mapped[str | None] = mapped_column(ForeignKey("care_gaps.id"), nullable=True)
+    title: Mapped[str] = mapped_column(String(300))  # operational, non-PHI
+    due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    sla_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    assignee_staff_id: Mapped[str | None] = mapped_column(ForeignKey("staff_users.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="open")  # open|done|cancelled
+    created_by: Mapped[str] = mapped_column(ForeignKey("staff_users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class AuditLog(Base):
     """Append-only access/action log — required for HIPAA audit controls."""
 

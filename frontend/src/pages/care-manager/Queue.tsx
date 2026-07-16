@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useSession } from "../../context/SessionContext";
 import { api } from "../../lib/api";
 import { MEASURE_LABELS } from "../../data/measures";
+import { getOverdueTasks } from "../../lib/workspace";
 
 interface GapRow {
   id: string;
@@ -38,6 +39,13 @@ export default function Queue() {
   const [gaps, setGaps] = useState<GapRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["key"]>("all");
+  const [overdueCount, setOverdueCount] = useState(0);
+
+  useEffect(() => {
+    getOverdueTasks(staff?.token)
+      .then((t) => setOverdueCount(t.length))
+      .catch(() => setOverdueCount(0));
+  }, [staff]);
 
   useEffect(() => {
     setLoading(true);
@@ -88,6 +96,15 @@ export default function Queue() {
             {safetyCount} member{safetyCount > 1 ? "s" : ""} flagged for safety
           </strong>{" "}
           — review immediately.
+        </div>
+      )}
+
+      {overdueCount > 0 && (
+        <div className="info-card" style={{ borderColor: "var(--warning-border)", background: "var(--warning-bg)" }}>
+          <strong>
+            {overdueCount} task{overdueCount > 1 ? "s" : ""} overdue
+          </strong>{" "}
+          across your members — check the Tasks panel on each case.
         </div>
       )}
 
