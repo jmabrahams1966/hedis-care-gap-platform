@@ -69,3 +69,35 @@ export const updateTask = (taskId: string, status: CareTask["status"], token?: s
 
 export const getOverdueTasks = (token?: string | null) =>
   api.get<CareTask[]>(`/api/tasks?status=overdue`, token);
+
+// --- Care plan (Feature B Phase 3) ---
+
+export interface CarePlanGoal {
+  id: string;
+  member_id: string;
+  care_gap_id: string | null;
+  goal_text: string;
+  interventions_text: string;
+  target_date: string | null;
+  status: "open" | "met" | "discontinued";
+  created_at: string;
+  updated_at: string;
+}
+
+export const GOAL_STATUS_BADGE: Record<string, string> = {
+  open: "open",
+  met: "done",
+  discontinued: "excluded",
+};
+
+export const getCarePlan = (memberId: string, token?: string | null) =>
+  api.get<CarePlanGoal[]>(`/api/members/${memberId}/care-plan`, token);
+
+export const createGoal = (
+  memberId: string,
+  body: { goal_text: string; interventions_text?: string; target_date?: string | null; care_gap_id?: string | null },
+  token?: string | null,
+) => api.post<CarePlanGoal>(`/api/members/${memberId}/care-plan`, body, token);
+
+export const updateGoal = (goalId: string, status: CarePlanGoal["status"], token?: string | null) =>
+  api.patch<CarePlanGoal>(`/api/care-plan/${goalId}`, { status }, token);

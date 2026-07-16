@@ -6,6 +6,7 @@ import { MEASURE_LABELS } from "../../data/measures";
 import MhTrendChart from "./MhTrendChart";
 import ClinicalNotes, { type CaseNote } from "./ClinicalNotes";
 import TaskList from "./TaskList";
+import CarePlan from "./CarePlan";
 
 interface InstrumentScore {
   total: number;
@@ -292,8 +293,8 @@ export default function CaseDetail() {
             ))}
           </div>
 
+          <CarePlan memberId={data.member_id} careGapId={data.id} />
           <ClinicalNotes gapId={data.id} notes={data.notes} onAdded={load} />
-          {/* care-plan slot — Feature B Phase 3 */}
         </div>
 
         <div className="workspace-side">

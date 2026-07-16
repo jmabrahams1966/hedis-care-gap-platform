@@ -199,6 +199,20 @@ class CareTaskUpdate(BaseModel):
     status: str  # done | cancelled | open
 
 
+class CarePlanGoalCreate(BaseModel):
+    goal_text: str
+    interventions_text: str = ""
+    target_date: str | None = None  # YYYY-MM-DD
+    care_gap_id: str | None = None
+
+
+class CarePlanGoalUpdate(BaseModel):
+    status: str | None = None  # open | met | discontinued
+    goal_text: str | None = None
+    interventions_text: str | None = None
+    target_date: str | None = None
+
+
 class GapStatusUpdate(BaseModel):
     status: str
     reason: str = ""

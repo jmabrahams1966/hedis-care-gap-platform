@@ -8,6 +8,7 @@ from .db import SessionLocal, init_db
 from .routers import (
     auth,
     care_gaps,
+    care_plan,
     dependents,
     maternity,
     medications,
@@ -67,6 +68,7 @@ app.include_router(care_gaps.router)
 app.include_router(outreach.router)
 app.include_router(reports.router)
 app.include_router(tasks.router)
+app.include_router(care_plan.router)
 app.include_router(webhooks.router)
 
 

@@ -490,6 +490,25 @@ class CareTask(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class CarePlanGoal(Base):
+    """A goal + interventions on a member's care plan. Free-text fields are PHI
+    (encrypted at rest)."""
+
+    __tablename__ = "care_plan_goals"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    member_id: Mapped[str] = mapped_column(ForeignKey("members.id"), index=True)
+    care_gap_id: Mapped[str | None] = mapped_column(ForeignKey("care_gaps.id"), nullable=True)
+    goal_text: Mapped[str] = mapped_column(EncryptedText)  # PHI — encrypted
+    interventions_text: Mapped[str] = mapped_column(EncryptedText, default="")  # PHI — encrypted
+    target_date: Mapped[str | None] = mapped_column(String(10), nullable=True)  # YYYY-MM-DD
+    status: Mapped[str] = mapped_column(String(16), default="open")  # open|met|discontinued
+    created_by: Mapped[str] = mapped_column(ForeignKey("staff_users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class AuditLog(Base):
     """Append-only access/action log — required for HIPAA audit controls."""
 

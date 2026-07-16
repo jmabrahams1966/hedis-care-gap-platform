@@ -784,6 +784,34 @@ td.num {
   margin-bottom: 0;
 }
 
+/* Care plan */
+.goal-row {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.goal-row:last-of-type {
+  border-bottom: none;
+}
+.goal-row__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.goal-row__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.goal-form {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
 @media (max-width: 860px) {
   .workspace-grid {
     grid-template-columns: 1fr;
