@@ -28,6 +28,14 @@ class Settings(BaseSettings):
     audit_archive_bucket: str = ""  # WORM S3 bucket for the immutable audit mirror
     pii_encryption_key: str = ""  # base64 64-byte AES-256-SIV key; empty → dev fallback
 
+    # KaveraChat AI assist (Feature E). Ships dormant: with ai_enabled=False the
+    # AI endpoints return 503 and the frontend hides every affordance, so the
+    # code can deploy before the Bedrock IAM grant is applied. Bedrock is the
+    # only inference path — no external LLM calls — keeping PHR/PHI in-VPC.
+    ai_enabled: bool = False
+    bedrock_model_id: str = "us.anthropic.claude-sonnet-4-20250514-v1:0"
+    ai_max_tokens: int = 1024
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

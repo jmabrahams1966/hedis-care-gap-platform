@@ -139,6 +139,19 @@ data "aws_iam_policy_document" "task_permissions" {
     actions   = ["kms:GenerateDataKey", "kms:Encrypt"]
     resources = [var.kms_key_arn]
   }
+  # KaveraChat AI assist (Feature E): invoke Claude via Bedrock in-VPC.
+  # Scoped to Anthropic models only. The default model is a cross-region
+  # inference profile (the "us." prefix), which fans out to the underlying
+  # foundation model in each region — so both ARN shapes must be granted.
+  # Feature stays dormant until settings.ai_enabled is flipped on.
+  statement {
+    sid       = "BedrockInvokeAnthropic"
+    actions   = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
+    resources = [
+      "arn:aws:bedrock:*::foundation-model/anthropic.*",
+      "arn:aws:bedrock:*:*:inference-profile/*.anthropic.*",
+    ]
+  }
 }
 
 resource "aws_iam_role_policy" "task_permissions" {

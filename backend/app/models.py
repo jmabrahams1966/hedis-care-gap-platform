@@ -637,6 +637,39 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+AI_SURFACES = {"composer", "summary", "triage", "outreach"}
+AI_OUTCOMES = {"generated", "accepted", "edited", "discarded"}
+
+
+class AiInteraction(Base):
+    """One row per KaveraChat AI assist call (Feature E). Every AI draft is
+    logged here — which surface asked, which staff member, the model, token
+    counts, latency, and what the human did with the draft (outcome). This is
+    the accountability record: AI output is never applied directly, so the
+    outcome trail shows a human accepted/edited/discarded each suggestion.
+
+    Prompt and completion text are deliberately NOT stored — a draft can echo
+    member PHI, and the interaction only needs to be countable and auditable,
+    not replayable. The generated draft lives in the operator's request/response
+    and, if accepted, in the note/message it becomes (already encrypted there)."""
+
+    __tablename__ = "ai_interactions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"), index=True)
+    surface: Mapped[str] = mapped_column(String(16))  # composer | summary | triage | outreach
+    actor_staff_id: Mapped[str | None] = mapped_column(
+        ForeignKey("staff_users.id"), nullable=True, index=True
+    )
+    member_id: Mapped[str | None] = mapped_column(ForeignKey("members.id"), nullable=True)
+    model: Mapped[str] = mapped_column(String(128))
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    outcome: Mapped[str] = mapped_column(String(16), default="generated")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class AuditLog(Base):
     """Append-only access/action log — required for HIPAA audit controls."""
 
