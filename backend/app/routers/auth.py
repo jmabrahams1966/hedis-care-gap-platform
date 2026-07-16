@@ -299,16 +299,72 @@ async def request_magic_link_by_phone(
 
 
 @router.post("/member/verify")
-async def verify_magic_link(body: MagicLinkVerify, db: AsyncSession = Depends(get_db)):
+async def verify_magic_link(
+    body: MagicLinkVerify, request: Request, db: AsyncSession = Depends(get_db)
+):
+    """Exchange a magic-link token for a member session.
+
+    Idempotent inside `magic_reuse_grace_minutes` of first use. The token is
+    still single-use against later replay (a link harvested from the mailbox
+    days after the member used it fails), but a link scanner's hit — or a
+    double-tap — no longer locks the member out of their own link.
+
+    Every attempt is audited with the reason, because this failure has only ever
+    been diagnosed by speculation. `used_age_seconds` on a rejection is the
+    tell: a few seconds means a scanner/double-tap raced the member (widen the
+    grace); hours means the link was detonated at delivery (needs a different
+    fix — see docs/RECONCILE_AND_HARDEN.md item 5).
+    """
     token_hash = hash_magic_token(body.token)
     res = await db.execute(select(MagicToken).where(MagicToken.token_hash == token_hash))
     magic = res.scalar_one_or_none()
-    if magic is None or magic.used_at is not None or magic.expires_at < datetime.utcnow():
+    now = datetime.utcnow()
+    ip = client_ip(request)
+
+    if magic is None or magic.expires_at < now:
+        await log_action(
+            db,
+            actor_type="member",
+            action="magic_verify_rejected",
+            resource_type="magic_token",
+            resource_id=magic.id if magic else "",
+            ip_address=ip,
+            metadata={"reason": "unknown_token" if magic is None else "expired"},
+        )
         raise HTTPException(401, "Link is invalid or expired")
 
-    magic.used_at = datetime.utcnow()
-    await db.commit()
+    reused = magic.used_at is not None
+    if reused:
+        used_age = (now - magic.used_at).total_seconds()
+        if used_age > settings.magic_reuse_grace_minutes * 60:
+            await log_action(
+                db,
+                actor_type="member",
+                actor_id=magic.member_id,
+                action="magic_verify_rejected",
+                resource_type="magic_token",
+                resource_id=magic.id,
+                ip_address=ip,
+                metadata={"reason": "already_used", "used_age_seconds": int(used_age)},
+            )
+            raise HTTPException(401, "Link is invalid or expired")
+
+    if not reused:
+        # Stamp on FIRST use only — never extend, or repeated hits would hold the
+        # grace window open indefinitely.
+        magic.used_at = now
 
     member = await db.get(Member, magic.member_id)
+    await log_action(
+        db,
+        actor_type="member",
+        actor_id=member.id,
+        action="magic_verify_reused_in_grace" if reused else "magic_verify_ok",
+        resource_type="magic_token",
+        resource_id=magic.id,
+        tenant_id=member.tenant_id,
+        ip_address=ip,
+    )
+
     token = create_jwt(member.id, {"kind": "member", "tenant_id": member.tenant_id})
     return {"token": token, "first_name": member.first_name}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
 import { useSession } from "../../context/SessionContext";
@@ -9,6 +9,13 @@ import { useSession } from "../../context/SessionContext";
  * headless browser, which would consume our single-use token before the member
  * ever clicks. Requiring an explicit tap means the scanner's visit is harmless
  * and the real click succeeds.
+ *
+ * The tap is also de-duped with a ref, not just the `status` state: two fast taps
+ * can both enter verify() before React re-renders and swaps the button out, which
+ * fired the exchange twice — the first call consumed the token and the second
+ * 401'd, so the member saw "invalid or expired" on a link that had just worked.
+ * (The backend now also tolerates this within a grace window; this is the belt to
+ * that suspenders — see auth.py::verify_magic_link.)
  */
 export default function Verify() {
   const [params] = useSearchParams();
@@ -17,9 +24,11 @@ export default function Verify() {
   const [error, setError] = useState(token ? "" : "This link is missing its token — please request a new one.");
   const { setMember } = useSession();
   const navigate = useNavigate();
+  const inFlight = useRef(false);
 
   async function verify() {
-    if (!token) return;
+    if (!token || inFlight.current) return;
+    inFlight.current = true;
     setStatus("verifying");
     setError("");
     try {
@@ -32,6 +41,7 @@ export default function Verify() {
       if (next === "messages") navigate("/messages", { replace: true });
       else navigate(focus ? `/screening?focus=${focus}` : "/screening", { replace: true });
     } catch (err) {
+      inFlight.current = false; // a genuine failure should still be retryable
       setStatus("error");
       setError(err instanceof ApiError ? err.message : "This link is invalid or expired — please request a new one.");
     }
@@ -41,9 +51,14 @@ export default function Verify() {
     <div className="app-shell" style={{ paddingTop: 64 }}>
       <div className="card" style={{ textAlign: "center" }}>
         {status === "error" ? (
-          <p className="error-text" style={{ marginBottom: 0 }}>
-            {error}
-          </p>
+          <>
+            <p className="error-text">{error}</p>
+            {/* A dead link is a dead end without this — the member has no way back
+                to request another, and no reason to think one would help. */}
+            <button className="btn secondary" onClick={() => navigate("/")} style={{ width: "100%" }}>
+              Request a new link
+            </button>
+          </>
         ) : status === "verifying" ? (
           <>
             <span className="spinner" style={{ marginBottom: 12 }} />

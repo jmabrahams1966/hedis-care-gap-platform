@@ -13,6 +13,14 @@ class Settings(BaseSettings):
     # 7 days — matching the outreach retry cadence — not the 30 minutes that only
     # suits a just-requested link. Still single-use.
     magic_ttl_minutes: int = 10080
+    # Magic links stay single-use, but "used" must tolerate something other than
+    # the member touching the link first — M365 Defender/Safe Links headless-
+    # renders links to scan them, and members double-tap. Both consumed the token
+    # and 401'd the real click (observed on prod 2026-07-14). Within this window
+    # after FIRST use, the same token re-issues the same member's session instead
+    # of erroring; after it, the link is spent. Measured from first use and never
+    # extended, so repeated hits can't hold the window open.
+    magic_reuse_grace_minutes: int = 10
 
     dev_mode: bool = True
     cors_origins: str = "http://localhost:5173"
