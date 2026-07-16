@@ -5,6 +5,26 @@ import { FEATURE_AI } from "../../lib/features";
 import AiLabel from "../../components/AiLabel";
 
 /**
+ * The model tends to emit light markdown (**bold**, a redundant "Case Summary"
+ * title, `- ` bullets) even when asked for plain prose. Rather than render a
+ * markdown tree for a few sentences, normalize to clean text: drop emphasis
+ * markers, strip a leading title line (the card header + AiLabel already say
+ * what this is), and turn bullets into real ones.
+ */
+function cleanSummary(raw: string): string[] {
+  const lines = raw
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/^#{1,6}\s*/gm, "")
+    .split("\n")
+    .map((l) => l.trim());
+  // Drop a leading title-ish line, e.g. "Member Case Summary - DRAFT for Review"
+  if (lines.length && /case summary|draft for/i.test(lines[0]) && lines[0].length < 80) {
+    lines.shift();
+  }
+  return lines.filter(Boolean).map((l) => l.replace(/^[-*]\s+/, "• "));
+}
+
+/**
  * Feature E workspace affordance: a one-click AI case summary built from the
  * member's gaps + notes + screening history. Read-only — it never writes a note.
  * The summary is a draft for the care manager to read; "Use as note prompt" and
@@ -56,9 +76,13 @@ export default function CaseSummary({ memberId }: { memberId: string }) {
       {error && <p className="muted">{error}</p>}
       {summary && (
         <>
-          <AiLabel style={{ display: "inline-block", marginBottom: 6 }} />
-          <p style={{ whiteSpace: "pre-wrap", margin: "4px 0 8px" }}>{summary}</p>
-          <div className="stack">
+          <AiLabel style={{ display: "inline-block", marginBottom: 8 }} />
+          <div className="ai-summary-body">
+            {cleanSummary(summary).map((line, i) => (
+              <p key={i}>{line}</p>
+            ))}
+          </div>
+          <div className="stack" style={{ marginTop: 12 }}>
             <button className="btn ghost sm" onClick={acknowledge}>
               Looks useful
             </button>

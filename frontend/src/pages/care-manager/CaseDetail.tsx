@@ -189,10 +189,10 @@ export default function CaseDetail() {
         </div>
       )}
 
+      <CaseSummary memberId={data.member_id} />
+
       <div className="workspace-grid">
         <div className="workspace-main">
-          <CaseSummary memberId={data.member_id} />
-
           {data.measure_code === "mental_health" && (
             <div className="card">
               <h2 className="card__title">Depression &amp; anxiety trend</h2>

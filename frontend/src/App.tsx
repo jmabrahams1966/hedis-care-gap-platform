@@ -86,7 +86,7 @@ export default function App() {
       <Route
         path="/queue/:gapId"
         element={
-          <StaffPage>
+          <StaffPage wide>
             <CaseDetail />
           </StaffPage>
         }

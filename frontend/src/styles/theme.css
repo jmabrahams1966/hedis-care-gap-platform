@@ -1016,6 +1016,18 @@ td.num {
   color: var(--text-muted);
   font-style: italic;
 }
+/* AI case summary: prose, so cap the measure (~78ch) for readability rather
+   than letting it span the full wide shell. */
+.ai-summary-body {
+  max-width: 78ch;
+}
+.ai-summary-body p {
+  margin: 0 0 10px;
+  line-height: 1.6;
+}
+.ai-summary-body p:last-child {
+  margin-bottom: 0;
+}
 .ai-risk-chip {
   display: inline-flex;
   align-items: center;
