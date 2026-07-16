@@ -8,6 +8,8 @@ import Overview from "./pages/care-manager/Overview";
 import Queue from "./pages/care-manager/Queue";
 import CaseDetail from "./pages/care-manager/CaseDetail";
 import TenantConfig from "./pages/admin/TenantConfig";
+import SequenceBuilder from "./pages/admin/SequenceBuilder";
+import OutreachAnalytics from "./pages/admin/OutreachAnalytics";
 import SuperAdmin from "./pages/superadmin/SuperAdmin";
 import Security from "./pages/Security";
 
@@ -76,6 +78,22 @@ export default function App() {
         element={
           <StaffPage>
             <TenantConfig />
+          </StaffPage>
+        }
+      />
+      <Route
+        path="/admin/sequences"
+        element={
+          <StaffPage wide>
+            <SequenceBuilder />
+          </StaffPage>
+        }
+      />
+      <Route
+        path="/admin/outreach"
+        element={
+          <StaffPage wide>
+            <OutreachAnalytics />
           </StaffPage>
         }
       />

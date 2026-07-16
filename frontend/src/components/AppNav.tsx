@@ -27,6 +27,8 @@ export default function AppNav() {
   }
   if (staff?.role === "payer_admin" || staff?.role === "super_admin") {
     links.push({ to: "/admin/measures", label: "Measures" });
+    links.push({ to: "/admin/sequences", label: "Sequences" });
+    links.push({ to: "/admin/outreach", label: "Outreach" });
   }
   if (staff?.role === "super_admin") {
     links.push({ to: "/superadmin", label: "Tenants" });

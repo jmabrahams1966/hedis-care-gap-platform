@@ -18,6 +18,7 @@ from .routers import (
     reports,
     safety,
     screenings,
+    sequences,
     tasks,
     tenants,
     webhooks,
@@ -73,6 +74,7 @@ app.include_router(tasks.router)
 app.include_router(care_plan.router)
 app.include_router(safety.router)
 app.include_router(enrollments.router)
+app.include_router(sequences.router)
 app.include_router(webhooks.router)
 
 

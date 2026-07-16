@@ -221,6 +221,30 @@ class SafetyPlanUpsert(BaseModel):
     notes: str = ""
 
 
+class SequenceStepIn(BaseModel):
+    step_order: int
+    offset_days: int
+    channel: str  # sms | email | member_preferred
+    template_key: str
+    recurring: bool = False
+    repeat_interval_days: int | None = None
+
+
+class SequenceCreate(BaseModel):
+    name: str
+    is_default: bool = False
+    steps: list[SequenceStepIn] = []
+
+
+class SequenceUpdate(BaseModel):
+    name: str
+    steps: list[SequenceStepIn] = []
+
+
+class MeasureSequenceAssign(BaseModel):
+    sequence_id: str | None = None
+
+
 class GapStatusUpdate(BaseModel):
     status: str
     reason: str = ""

@@ -8,6 +8,7 @@ import ClinicalNotes, { type CaseNote } from "./ClinicalNotes";
 import TaskList from "./TaskList";
 import CarePlan from "./CarePlan";
 import SafetyPanel from "./SafetyPanel";
+import EnrollmentControl from "./EnrollmentControl";
 
 interface InstrumentScore {
   total: number;
@@ -340,6 +341,7 @@ export default function CaseDetail() {
             </div>
           </div>
           {data.safety_flag && <SafetyPanel memberId={data.member_id} careGapId={data.id} />}
+          <EnrollmentControl memberId={data.member_id} />
           <TaskList memberId={data.member_id} careGapId={data.id} />
         </div>
       </div>

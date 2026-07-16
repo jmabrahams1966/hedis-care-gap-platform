@@ -35,4 +35,5 @@ export const api = {
     request<T>(path, { method: "PATCH", body: JSON.stringify(body) }, token),
   put: <T>(path: string, body: unknown, token?: string | null) =>
     request<T>(path, { method: "PUT", body: JSON.stringify(body) }, token),
+  del: <T>(path: string, token?: string | null) => request<T>(path, { method: "DELETE" }, token),
 };

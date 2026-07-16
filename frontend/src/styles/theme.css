@@ -851,6 +851,51 @@ td.num {
   font-size: 14px;
 }
 
+/* Sequence builder + enrollment control (Feature C1) */
+.seq-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.seq-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+.seq-item:hover {
+  border-color: var(--border-strong);
+}
+.seq-item--active {
+  border-color: var(--primary-500);
+  background: var(--primary-50);
+}
+.enroll-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.enroll-row {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.enroll-row:last-child {
+  border-bottom: none;
+}
+.enroll-row__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 @media (max-width: 860px) {
   .workspace-grid {
     grid-template-columns: 1fr;

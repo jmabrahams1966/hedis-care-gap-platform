@@ -145,3 +145,28 @@ export const getEscalation = (careGapId: string, token?: string | null) =>
 
 export const toggleEscalationStep = (careGapId: string, stepKey: string, token?: string | null) =>
   api.post<EscalationStep>(`/api/care-gaps/${careGapId}/escalation/${stepKey}`, {}, token);
+
+// --- Outreach enrollments (Feature C1, care-manager control) ---
+
+export interface Enrollment {
+  id: string;
+  member_id: string;
+  care_gap_id: string | null;
+  sequence_id: string;
+  status: "active" | "paused" | "ended";
+  current_step_order: number;
+  next_send_at: string | null;
+  ended_reason: string | null;
+}
+
+export const getMemberEnrollments = (memberId: string, token?: string | null) =>
+  api.get<Enrollment[]>(`/api/members/${memberId}/enrollments`, token);
+
+export const pauseEnrollment = (id: string, token?: string | null) =>
+  api.post<Enrollment>(`/api/enrollments/${id}/pause`, {}, token);
+
+export const resumeEnrollment = (id: string, token?: string | null) =>
+  api.post<Enrollment>(`/api/enrollments/${id}/resume`, {}, token);
+
+export const endEnrollment = (id: string, token?: string | null) =>
+  api.post<Enrollment>(`/api/enrollments/${id}/end`, {}, token);
