@@ -15,3 +15,6 @@ infra/*.out
 frontend/.env.production
 .claude/
 .env
+
+frontend/.env.local
+frontend/.env.*.local
