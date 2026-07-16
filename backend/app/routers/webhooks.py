@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..audit import log_action
 from ..cadence_service import end_active_enrollments_for_member
 from ..db import get_db
+from ..messaging_service import get_or_create_conversation, record_inbound_message
 from ..models import Member
 from ..notifications.sns_verify import confirm_subscription, verify_sns_signature
 
@@ -49,7 +50,8 @@ async def sms_inbound(request: Request, db: AsyncSession = Depends(get_db)):
         raise HTTPException(400, "Invalid SNS message payload")
 
     phone = message.get("originationNumber", "")
-    text = (message.get("messageBody") or "").strip().upper()
+    raw_body = (message.get("messageBody") or "").strip()
+    text = raw_body.upper()
 
     member = (await db.execute(select(Member).where(Member.phone == phone))).scalar_one_or_none()
     if member is None:
@@ -86,5 +88,13 @@ async def sms_inbound(request: Request, db: AsyncSession = Depends(get_db)):
             metadata={"keyword": text},
         )
         return {"status": "opted_in"}
+
+    # Any other inbound SMS is a reply in the member's secure-messaging thread
+    # (Feature D) — route it in, running the always-on crisis/after-hours logic.
+    if raw_body:
+        conversation = await get_or_create_conversation(db, member)
+        _, outcome = await record_inbound_message(db, conversation, member, raw_body, channel="sms")
+        await db.commit()
+        return {"status": "message_received", "outcome": outcome}
 
     return {"status": "no_action"}

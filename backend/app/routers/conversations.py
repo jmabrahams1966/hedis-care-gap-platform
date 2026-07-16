@@ -3,12 +3,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..deps import require_role
-from ..messaging_service import send_staff_message
+from ..deps import get_current_member, require_role
+from ..messaging_service import get_or_create_conversation, record_inbound_message, send_staff_message
 from ..models import Conversation, Member, Message, StaffRole, StaffUser
 from ..schemas import ConversationAssign, MessageSend
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
+member_router = APIRouter(prefix="/api/member/conversation", tags=["conversations"])
 
 _ROLES = (StaffRole.care_manager.value, StaffRole.payer_admin.value, StaffRole.super_admin.value)
 
@@ -133,3 +134,41 @@ async def close(
     c.status = "closed"
     await db.commit()
     return await _summary(db, c)
+
+
+# --- Member side (magic-link authenticated) ---
+
+
+@member_router.get("")
+async def member_thread(
+    member: Member = Depends(get_current_member),
+    db: AsyncSession = Depends(get_db),
+):
+    c = await get_or_create_conversation(db, member)
+    msgs = (
+        await db.execute(
+            select(Message).where(Message.conversation_id == c.id).order_by(Message.created_at.asc())
+        )
+    ).scalars().all()
+    if c.member_unread:
+        c.member_unread = False
+    await db.commit()
+    return {
+        "conversation": {"id": c.id, "status": c.status, "crisis_flag": c.crisis_flag},
+        "messages": [_msg(m) for m in msgs],
+    }
+
+
+@member_router.post("/messages")
+async def member_send(
+    body: MessageSend,
+    member: Member = Depends(get_current_member),
+    db: AsyncSession = Depends(get_db),
+):
+    if not body.body.strip():
+        raise HTTPException(422, "Message body is required")
+    c = await get_or_create_conversation(db, member)
+    msg, outcome = await record_inbound_message(db, c, member, body.body.strip(), channel="web")
+    await db.commit()
+    await db.refresh(msg)
+    return {**_msg(msg), "outcome": outcome}

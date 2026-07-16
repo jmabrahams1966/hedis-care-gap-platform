@@ -13,7 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .audit import log_action
 from .config import settings
-from .models import Conversation, MagicToken, Member, Message
+from .crisis import AFTER_HOURS_ACK, CRISIS_AUTO_REPLY, crisis_scan, within_business_hours
+from .models import CareGap, Conversation, GapStatus, MagicToken, Member, Message
 from .notifications.email_service import send_email
 from .notifications.sms_service import send_sms
 from .security import generate_magic_token, magic_token_expiry
@@ -56,6 +57,84 @@ async def notify_member_of_message(db: AsyncSession, member: Member) -> str | No
     except Exception:  # noqa: BLE001 — a notification failure must not lose the message
         return "notify_failed"
     return None
+
+
+async def _raise_member_safety_flag(db: AsyncSession, member: Member) -> None:
+    """Tie a messaging crisis into Feature B: flag the member's open mental-health
+    gap so it surfaces in the queue + the case-workspace SafetyPanel."""
+    gap = (
+        await db.execute(
+            select(CareGap).where(
+                CareGap.member_id == member.id,
+                CareGap.measure_code == "mental_health",
+                CareGap.status.notin_([GapStatus.closed.value, GapStatus.excluded.value]),
+            )
+        )
+    ).scalars().first()
+    if gap is not None:
+        gap.safety_flag = True
+
+
+def _system_reply(conversation: Conversation, channel: str, text: str, crisis: bool) -> Message:
+    return Message(
+        conversation_id=conversation.id,
+        direction="outbound",
+        channel=channel,
+        sender_staff_id=None,
+        body=text,
+        crisis_flag=crisis,
+    )
+
+
+async def record_inbound_message(
+    db: AsyncSession,
+    conversation: Conversation,
+    member: Member,
+    body: str,
+    channel: str,
+    now: datetime | None = None,
+) -> tuple[Message, str]:
+    """Append an inbound member message (web or sms) and run the always-on safety
+    logic: crisis → immediate 988 auto-reply + Feature B safety flag; else
+    after-hours → auto-acknowledge. Returns (message, outcome). Caller commits."""
+    now = now or datetime.utcnow()
+    msg = Message(conversation_id=conversation.id, direction="inbound", channel=channel, body=body)
+    db.add(msg)
+    conversation.staff_unread = True
+    conversation.last_message_at = now
+
+    outcome = "in_hours"
+    if crisis_scan(body):
+        msg.crisis_flag = True
+        conversation.crisis_flag = True
+        db.add(_system_reply(conversation, channel, CRISIS_AUTO_REPLY, crisis=True))
+        conversation.member_unread = True
+        if channel == "sms" and member.phone:
+            try:
+                send_sms(member.phone, CRISIS_AUTO_REPLY)  # 988 text is safe on SMS
+            except Exception:  # noqa: BLE001
+                pass
+        await _raise_member_safety_flag(db, member)
+        await log_action(
+            db,
+            actor_type="system",
+            action="message_crisis_detected",
+            resource_type="conversation",
+            resource_id=conversation.id,
+            tenant_id=conversation.tenant_id,
+        )
+        outcome = "crisis"
+    elif not within_business_hours(now):
+        db.add(_system_reply(conversation, channel, AFTER_HOURS_ACK, crisis=False))
+        conversation.member_unread = True
+        if channel == "sms" and member.phone:
+            try:
+                send_sms(member.phone, AFTER_HOURS_ACK)
+            except Exception:  # noqa: BLE001
+                pass
+        outcome = "after_hours_ack"
+
+    return msg, outcome
 
 
 async def send_staff_message(db: AsyncSession, conversation: Conversation, staff, body: str) -> Message:

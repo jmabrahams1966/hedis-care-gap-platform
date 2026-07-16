@@ -77,6 +77,7 @@ app.include_router(safety.router)
 app.include_router(enrollments.router)
 app.include_router(sequences.router)
 app.include_router(conversations.router)
+app.include_router(conversations.member_router)
 app.include_router(webhooks.router)
 
 
