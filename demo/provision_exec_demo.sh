@@ -59,8 +59,8 @@ script = (
 "import asyncio\n"
 "from sqlalchemy import select\n"
 "from app.db import SessionLocal, init_db\n"
-"from app.models import Tenant, StaffUser, StaffRole, Member\n"
-"from app.security import hash_password\n"
+"from app.models import Tenant, StaffUser, StaffRole, Member, MagicToken\n"
+"from app.security import hash_password, generate_magic_token, magic_token_expiry\n"
 "from app.routers.members import _create_member\n"
 "from app.schemas import MemberCreate\n"
 f"EMAIL={email!r}\nNAME={name!r}\nPW={pw!r}\nMID={mid!r}\nDOB={dob!r}\n"
@@ -84,7 +84,10 @@ f"FIRST={first!r}\nLAST={last!r}\n"
 "        else:\n"
 "            m=await _create_member(db,t.id,MemberCreate(external_member_id=MID,first_name=FIRST,last_name=LAST,date_of_birth=DOB,sex='U',email=EMAIL,preferred_channel='email',consent_email=True))\n"
 "            print('MEMBER_CREATED alias=%s' % m.alias)\n"
+"        raw, th = generate_magic_token()\n"
+"        db.add(MagicToken(member_id=m.id, token_hash=th, purpose='screening', expires_at=magic_token_expiry()))\n"
 "        await db.commit()\n"
+"        print('MAGIC_TOKEN %s' % raw)\n"
 "asyncio.run(main())\n"
 )
 print(json.dumps({"containerOverrides":[{"name":"backend","command":["python","-c",script]}]}))
@@ -110,6 +113,17 @@ case "$LOG" in
   *) echo "ERROR: no DB-write marker. NOT printing credentials." >&2; exit 1 ;;
 esac
 
+# Pre-minted link so the recipient doesn't have to type a member ID and wait for
+# mail. NOTE: this is convenience, not immunity — if you paste it into an email,
+# their scanner touches it exactly like any other link. What protects that click
+# is the reuse grace in auth.py::verify_magic_link, not this.
+RAW_TOKEN=$(printf '%s' "$LOG" | tr ' \t' '\n\n' | grep -A1 '^MAGIC_TOKEN$' | tail -1)
+if [ -z "$RAW_TOKEN" ]; then
+  echo "ERROR: no MAGIC_TOKEN in task output — not printing a link that won't work." >&2
+  exit 1
+fi
+MAGIC_LINK="${SITE}/verify?token=${RAW_TOKEN}"
+
 echo "==> 3/3  Verifying the staff login actually works"
 if ! curl -fsS -X POST "$API/api/auth/staff/login" -H 'Content-Type: application/json' \
       -d "{\"email\":\"$EMAIL\",\"password\":\"$STAFF_PW\"}" >/dev/null 2>&1; then
@@ -129,12 +143,26 @@ STAFF (click "Admin" on the sign-in screen):
   Sees: Quality Overview, care-gap queue, case workspace, outreach
         sequences, and the AI assist (Summarize case / Draft reply).
 
-PATIENT VIEW (click "Member", then "Use member ID"):
+PATIENT VIEW — one-click (paste this link into your email to them):
+  $MAGIC_LINK
+
+PATIENT VIEW — self-serve fallback (if the link above is spent):
+  Site: $SITE  ->  "Member" -> "Use member ID"
   Member ID:      $MEMBER_ID
   Date of birth:  $MEMBER_DOB
-  Sends a secure check-in link to $EMAIL.
+  Sends a fresh check-in link to $EMAIL.
 
 All data in this tenant is synthetic. Please don't enter real member
 information — there's no BAA in place for this demo.
 =========================================================
+
+Notes for you (do not forward):
+  * The link above is a live credential for that member — treat it like a
+    password. It expires in ~7 days and is single-use, with a 60-minute grace
+    so a mail scanner's touch doesn't lock them out.
+  * If they report "Link is invalid or expired", the self-serve fallback above
+    always mints a fresh one. Then check the audit trail:
+      action=magic_verify_rejected, metadata.used_age_seconds
+    Seconds => a scanner raced them (raise magic_reuse_grace_minutes).
+    Hours   => delivery-time detonation (see RECONCILE_AND_HARDEN item 5).
 EOF
